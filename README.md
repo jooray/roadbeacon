@@ -2,6 +2,20 @@
 
 **A decentralized road event reporting system — "Waze without the centralized tracking"**
 
+<!-- jooray-links:start -->
+### More from me
+
+**Related projects**
+
+- [MeshCore-BTC](https://github.com/jooray/MeshCore-BTC): Bitcoin price bot for MeshCore mesh networks
+- [MeshCore-BitChat](https://github.com/jooray/MeshCore-BitChat): bridge between MeshCore and BitChat mesh networks
+- [nostr-scripts](https://github.com/jooray/nostr-scripts): small Nostr command-line scripts
+
+**Full project showcase:** [Roadstr in my project showcase](https://juraj.bednar.io/showcase/#RF-03), or [all my projects](https://juraj.bednar.io/showcase/).
+
+I write about building things on [my blog](https://juraj.bednar.io/en/blog-en/). I also wrote a cypherpunk novel, [Tamers of Entropy](https://tamersofentropy.net/), and there is a [trailer](https://tamersofentropy.net/#trailer).
+<!-- jooray-links:end -->
+
 Roadstr allows drivers to report and view road events (police, accidents, construction, hazards) using the Nostr protocol. Events are cryptographically signed, verifiable, and shared across a decentralized network of relays. No central authority, no tracking, no data harvesting.
 
 ### [Web Version](https://cypherpunk.today/static/roadstr)
