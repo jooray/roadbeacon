@@ -23,7 +23,7 @@ Formerly called Roadstr. The app was renamed to avoid confusion with the indepen
 event layout so both clients write the same bytes. See [`docs/ecosystem.md`](docs/ecosystem.md) for
 the whole story and the plan for the two apps.
 
-### [Web Version](https://cypherpunk.today/static/roadstr)
+### [Web Version](https://cypherpunk.today/static/roadbeacon/)
 
 ![Web Interface](images/screenshot-web.png)
 
@@ -67,7 +67,7 @@ Integrates directly with the OsmAnd navigation app via AIDL. Events appear as co
 
 ## How to Try
 
-**Web version**: [Try it online](https://cypherpunk.today/static/roadstr)
+**Web version**: [Try it online](https://cypherpunk.today/static/roadbeacon/)
 
 **Android app**: Install from [Zapstore](https://zapstore.dev/apps/app.roadbeacon), or download the APK from [GitHub Releases](https://github.com/jooray/roadbeacon/releases)
 
