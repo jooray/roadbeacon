@@ -34,14 +34,16 @@ The keystore file itself lives outside the repo at the path specified in `storeF
 - **EventCache** — In-memory cache with 60s cleanup timer; callbacks for map removal on expiry
 - **MapLayerManager** — Manages OsmAnd map layer points via AIDL
 - **AlertEngine** — Proximity-based notifications for nearby road events
-- **BinaryCodec** — Strict 110/134-byte frame codec (refuses non-representable events)
-- **CanonicalCoordinates** — Integer E7 parse/format; no `String.format`, no truncation
-- **ProtocolText** — frozen v1 strings (`alt = "Roadstr: …"`); never rebrand these
+- **BinaryCodec** — Strict frame codec: reports 117–165 bytes, votes 134, refuses anything that does not round-trip
+- **CanonicalCoordinates** — Integer E6 parse/format; no `String.format`, no truncation
+- **RoadEventFormat** — retention rule (`created_at + max(14 d, lifetime)`) and the 48-byte comment limit
 
 ## Key Nostr Kinds
 
-- **1315** — Road event report (type, lat/lon, geohash, expiration)
-- **1316** — Confirmation/denial of an existing report
+- **1315** — Road event report: `lat, lon, g, g, g, t, expiration[, maxspeed]`
+- **1316** — Confirmation/denial: `e, status` only (no position, no expiration)
+
+The old `alt`-bearing layout is deprecated. Do not write it, do not add a reader for it.
 
 ## Testing
 
@@ -49,5 +51,5 @@ The keystore file itself lives outside the repo at the path specified in `storeF
 ./gradlew test
 ```
 
-`BinaryCodecTest` pins a conformance vector published by the independent Roadstr client. Changing
+`BinaryCodecTest` pins a frame and event ID computed by an independent implementation. Changing
 canonicalisation without changing that test's expectations is the intended way to notice a mistake.
