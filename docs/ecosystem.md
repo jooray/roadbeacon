@@ -221,6 +221,39 @@ the internet that is a cache miss; on a mesh with no internet it can be a lost v
 Worse, it costs 32 bytes for the ID and then 0 bytes for position, while a self-contained
 version costs 40 bytes. There is room: 142 ≤ 165.
 
+### 5.2 Can a Roadstr-native event be converted into a frame?
+
+**Not after the fact.** A conversion from their layout (`lat, lon, g, g, g, t, expiration[,
+maxspeed]`, six decimals, no `alt`) into ours is a different tag set, therefore a different event
+ID, therefore an invalid signature. Nobody but the author's signer can produce the second event —
+which is exactly what their opt-in "publish compatible copy" does. A bridge cannot translate; it
+can only carry or drop.
+
+**It could be made frameable with a second layout in the frame.** Everything their native report
+needs is derivable from a compact field set if five things are pinned:
+
+| Requirement | Their native layout | Consequence |
+|---|---|---|
+| Coordinates | six decimals, `BigDecimal HALF_UP` from a `Double` | frame carries degrees × 10⁶; rounding must match at the sixth decimal |
+| Tag order | `lat, lon, g, g, g, t, expiration[, maxspeed]` | fixed rebuild rule |
+| `alt` | absent | fixed rebuild rule |
+| `content` | may carry a comment | a comment makes the event unframeable, same as ours |
+| `expiration` | `created_at + category TTL` (verified: `safeClientExpiration`) | the TTL table becomes part of the wire contract |
+| `maxspeed` | optional, 5–300 on speed cameras | needs a uint16 (1 byte cannot hold 300) |
+
+Size: 110 + 2 (maxspeed) = **112 bytes**, or 116 if the expiration is carried instead of derived.
+Both fit in 165.
+
+Why not do it now: it doubles the codec matrix (two layouts × two classes), turns their category
+TTL table into something that cannot be changed without invalidating old frames, adds a sixth-
+decimal rounding edge case, and still excludes every report with a comment. It also only helps for
+events their app chose to publish — and, by default, it publishes only its own layout. The
+justified use case is a mesh-only bridge between two communities whose Roadstr users never turn on
+the compatible copy; even then, asking them to publish the copy is cheaper than a second decoder.
+
+**Recommendation:** one layout in the frame. Read their layout for display, and for the radio rely
+on the compatible copy (v1 today, v2 after §7.3).
+
 ---
 
 ## 6. What we fixed in this pass
