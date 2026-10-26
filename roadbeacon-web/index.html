@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#020617">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Roadbeacon - Decentralized Road Events</title>
+  <meta name="description" content="Decentralized road event reporting on Nostr">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- MapLibre GL for OpenFreeMap vector tiles -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.3/leaflet-maplibre-gl.js"></script>
+
+  <!-- Leaflet Geocoder -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+  <!-- Leaflet Locate -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.js"></script>
+
+  <!-- QR Creator (for NIP-46) -->
+  <script src="https://cdn.jsdelivr.net/npm/qr-creator/dist/qr-creator.min.js"></script>
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Publishing Status Bar -->
+  <div id="publish-status-bar" class="publish-status-bar hidden">
+    <div class="publish-status-content">
+      <span class="publish-status-icon">📡</span>
+      <span class="publish-status-text">Publishing...</span>
+      <div class="publish-relay-dots" id="publish-relay-dots"></div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header id="header">
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">🛣️</div>
+        <span class="app-name">Roadbeacon</span>
+      </div>
+      <span class="app-badge">Beta</span>
+    </div>
+    <div class="header-right">
+      <button id="relay-status" class="relay-status" title="Click to configure relays">
+        <span class="status-dot"></span>
+        <span class="status-text">Disconnected</span>
+      </button>
+      <button id="btn-auth" class="btn-header">
+        <span class="btn-icon">🔑</span>
+        <span class="btn-text">Identity</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Floating Action Button for quick report -->
+  <button id="fab-report" class="fab-report" title="Report event at center">
+    <span class="fab-icon">⚠️</span>
+  </button>
+
+  <!-- Auth Dialog -->
+  <dialog id="auth-dialog">
+    <div class="dialog-header">
+      <div class="dialog-icon">🔐</div>
+      <div class="dialog-title">
+        <h3>Connect Identity</h3>
+        <p>Choose how to authenticate with the Nostr network</p>
+      </div>
+    </div>
+    <div class="dialog-content">
+      <div class="auth-modes">
+        <label class="auth-option">
+          <input type="radio" name="auth-mode" value="ephemeral" checked>
+          <div class="auth-option-content">
+            <div class="auth-option-icon">👻</div>
+            <div class="auth-option-text">
+              <strong>Ephemeral (anonymous)</strong>
+              <span>New identity for each report (default)</span>
+            </div>
+          </div>
+        </label>
+        <label class="auth-option">
+          <input type="radio" name="auth-mode" value="generate">
+          <div class="auth-option-content">
+            <div class="auth-option-icon">🆕</div>
+            <div class="auth-option-text">
+              <strong>Generate new key</strong>
+              <span>Create a persistent identity</span>
+            </div>
+          </div>
+        </label>
+        <label class="auth-option">
+          <input type="radio" name="auth-mode" value="import">
+          <div class="auth-option-content">
+            <div class="auth-option-icon">📥</div>
+            <div class="auth-option-text">
+              <strong>Import nsec</strong>
+              <span>Use your existing private key</span>
+            </div>
+          </div>
+        </label>
+        <label class="auth-option">
+          <input type="radio" name="auth-mode" value="nip07">
+          <div class="auth-option-content">
+            <div class="auth-option-icon">🔌</div>
+            <div class="auth-option-text">
+              <strong>NIP-07 Extension</strong>
+              <span>Use browser extension (Alby, etc.)</span>
+            </div>
+          </div>
+        </label>
+        <label class="auth-option">
+          <input type="radio" name="auth-mode" value="nip46">
+          <div class="auth-option-content">
+            <div class="auth-option-icon">📱</div>
+            <div class="auth-option-text">
+              <strong>NIP-46 / Amber</strong>
+              <span>Connect with mobile signer</span>
+            </div>
+          </div>
+        </label>
+      </div>
+      <div id="auth-params" class="auth-params">
+        <input type="text" id="nsec-input" placeholder="nsec1..." class="hidden" />
+        <div id="nip46-display" class="hidden">
+          <div id="nip46-qr"></div>
+          <a id="nip46-link" href="#" class="nip46-link">Open in Amber</a>
+        </div>
+      </div>
+      <div id="auth-status" class="auth-status"></div>
+    </div>
+    <div class="dialog-footer">
+      <button id="btn-auth-logout" class="btn-danger hidden">Logout</button>
+      <button id="btn-auth-cancel" class="btn-secondary">Cancel</button>
+      <button id="btn-auth-confirm" class="btn-primary">Connect</button>
+    </div>
+  </dialog>
+
+  <!-- Relay Dialog -->
+  <dialog id="relay-dialog">
+    <div class="dialog-header">
+      <div class="dialog-icon">📡</div>
+      <div class="dialog-title">
+        <h3>Relay Configuration</h3>
+        <p>Manage the Nostr relays you connect to</p>
+      </div>
+    </div>
+    <div class="dialog-content">
+      <ul id="relay-list" class="relay-list"></ul>
+      <div class="relay-add">
+        <input type="text" id="relay-input" placeholder="wss://relay.example.com" />
+        <button id="btn-relay-add" class="btn-icon-btn">➕</button>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button id="btn-relay-reset" class="btn-secondary">Reset to defaults</button>
+      <button id="btn-relay-close" class="btn-primary">Done</button>
+    </div>
+  </dialog>
+
+  <!-- Report Dialog -->
+  <dialog id="report-dialog">
+    <div class="dialog-header">
+      <div class="dialog-icon">⚠️</div>
+      <div class="dialog-title">
+        <h3>Report Road Event</h3>
+        <p>Select the type of event to report</p>
+      </div>
+    </div>
+    <div class="dialog-content">
+      <div id="report-coords" class="report-coords"></div>
+      <div id="type-grid" class="type-grid"></div>
+      <div class="input-group">
+        <label for="report-comment">Additional details (optional)</label>
+        <textarea id="report-comment" placeholder="Add more information about this event..." rows="2"></textarea>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button id="btn-report-cancel" class="btn-secondary">Cancel</button>
+      <button id="btn-report-submit" class="btn-primary" disabled>Report Event</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

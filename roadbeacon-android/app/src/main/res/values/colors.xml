@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Roadbeacon Modern Color Palette - Deep Indigo Night Drive -->
+    
+    <!-- Primary - Electric Indigo -->
+    <color name="primary">#6366F1</color>
+    <color name="colorPrimary">#6366F1</color>
+    <color name="onPrimary">#FFFFFF</color>
+    <color name="primaryContainer">#4338CA</color>
+    <color name="onPrimaryContainer">#E0E7FF</color>
+    
+    <!-- Secondary - Cyan Accent -->
+    <color name="secondary">#06B6D4</color>
+    <color name="onSecondary">#001F25</color>
+    <color name="secondaryContainer">#0891B2</color>
+    <color name="onSecondaryContainer">#CFFAFE</color>
+    
+    <!-- Tertiary - Warm Amber -->
+    <color name="tertiary">#F59E0B</color>
+    <color name="onTertiary">#271900</color>
+    <color name="tertiaryContainer">#D97706</color>
+    <color name="onTertiaryContainer">#FEF3C7</color>
+    
+    <!-- Surface - Deep Night -->
+    <color name="surface">#0F172A</color>
+    <color name="onSurface">#F1F5F9</color>
+    <color name="surfaceVariant">#1E293B</color>
+    <color name="onSurfaceVariant">#94A3B8</color>
+    
+    <!-- Background -->
+    <color name="background">#020617</color>
+    <color name="onBackground">#F8FAFC</color>
+    
+    <!-- Status & Navigation Bars -->
+    <color name="statusBar">#0F172A</color>
+    <color name="navigationBar">#0F172A</color>
+    
+    <!-- Error -->
+    <color name="error">#EF4444</color>
+    <color name="onError">#FFFFFF</color>
+    <color name="errorContainer">#DC2626</color>
+    <color name="onErrorContainer">#FEE2E2</color>
+    
+    <!-- Outline -->
+    <color name="outline">#334155</color>
+    <color name="outlineVariant">#1E293B</color>
+    
+    <!-- Event Type Colors - Vibrant for visibility -->
+    <color name="type_police">#3B82F6</color>          <!-- Blue -->
+    <color name="type_speed_camera">#8B5CF6</color>    <!-- Purple -->
+    <color name="type_traffic_jam">#F97316</color>     <!-- Orange -->
+    <color name="type_accident">#EF4444</color>        <!-- Red -->
+    <color name="type_road_closure">#7C2D12</color>    <!-- Dark Red/Brown -->
+    <color name="type_construction">#EAB308</color>    <!-- Yellow -->
+    <color name="type_hazard">#F59E0B</color>          <!-- Amber -->
+    <color name="type_road_condition">#0EA5E9</color>  <!-- Sky Blue -->
+    <color name="type_pothole">#78350F</color>         <!-- Brown -->
+    <color name="type_fog">#64748B</color>             <!-- Slate -->
+    <color name="type_ice">#22D3EE</color>             <!-- Cyan -->
+    <color name="type_animal">#10B981</color>          <!-- Emerald -->
+    <color name="type_custom">#6B7280</color>          <!-- Gray -->
+    
+    <!-- Glassmorphism Overlay -->
+    <color name="glass_background">#CC0F172A</color>
+    <color name="glass_border">#33FFFFFF</color>
+    
+    <!-- Status Colors -->
+    <color name="status_active">#10B981</color>
+    <color name="status_inactive">#EF4444</color>
+    <color name="status_warning">#F59E0B</color>
+    
+    <!-- Gradient Overlay for Cards -->
+    <color name="card_gradient_start">#1E293B</color>
+    <color name="card_gradient_end">#0F172A</color>
+</resources>

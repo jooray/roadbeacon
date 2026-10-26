@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Modern Roadbeacon Theme - Deep Indigo Night Drive -->
+    <style name="Theme.Roadbeacon" parent="Theme.Material3.Dark.NoActionBar">
+        <!-- Primary Colors -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="colorPrimaryContainer">@color/primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/onPrimaryContainer</item>
+        
+        <!-- Secondary Colors -->
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorOnSecondary">@color/onSecondary</item>
+        <item name="colorSecondaryContainer">@color/secondaryContainer</item>
+        <item name="colorOnSecondaryContainer">@color/onSecondaryContainer</item>
+        
+        <!-- Tertiary Colors -->
+        <item name="colorTertiary">@color/tertiary</item>
+        <item name="colorOnTertiary">@color/onTertiary</item>
+        <item name="colorTertiaryContainer">@color/tertiaryContainer</item>
+        <item name="colorOnTertiaryContainer">@color/onTertiaryContainer</item>
+        
+        <!-- Surface Colors -->
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/onSurface</item>
+        <item name="colorSurfaceVariant">@color/surfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/onSurfaceVariant</item>
+        
+        <!-- Background -->
+        <item name="android:colorBackground">@color/background</item>
+        <item name="colorOnBackground">@color/onBackground</item>
+        
+        <!-- Error Colors -->
+        <item name="colorError">@color/error</item>
+        <item name="colorOnError">@color/onError</item>
+        <item name="colorErrorContainer">@color/errorContainer</item>
+        <item name="colorOnErrorContainer">@color/onErrorContainer</item>
+        
+        <!-- Outline -->
+        <item name="colorOutline">@color/outline</item>
+        <item name="colorOutlineVariant">@color/outlineVariant</item>
+        
+        <!-- Status Bar -->
+        <item name="android:statusBarColor">@color/statusBar</item>
+        <item name="android:navigationBarColor">@color/navigationBar</item>
+        <item name="android:windowLightStatusBar">false</item>
+        
+        <!-- Component Styles -->
+        <item name="materialButtonStyle">@style/Widget.Roadbeacon.Button</item>
+        <item name="materialButtonOutlinedStyle">@style/Widget.Roadbeacon.Button.Outlined</item>
+        <item name="materialCardViewStyle">@style/Widget.Roadbeacon.Card</item>
+        <item name="textInputStyle">@style/Widget.Roadbeacon.TextInput</item>
+        
+        <!-- Typography -->
+        <item name="textAppearanceHeadlineLarge">@style/TextAppearance.Roadbeacon.HeadlineLarge</item>
+        <item name="textAppearanceHeadlineMedium">@style/TextAppearance.Roadbeacon.HeadlineMedium</item>
+        <item name="textAppearanceTitleLarge">@style/TextAppearance.Roadbeacon.TitleLarge</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.Roadbeacon.TitleMedium</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.Roadbeacon.BodyLarge</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.Roadbeacon.BodyMedium</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.Roadbeacon.LabelLarge</item>
+    </style>
+
+    <style name="Theme.Roadbeacon.Dialog" parent="Theme.Material3.Dark.Dialog">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryContainer">@color/primaryContainer</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="android:colorBackground">@color/surface</item>
+        <item name="materialButtonStyle">@style/Widget.Roadbeacon.Button</item>
+    </style>
+
+</resources>

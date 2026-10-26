@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="12dp"
+    android:clickable="true"
+    android:focusable="true"
+    app:cardBackgroundColor="@color/surfaceVariant"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="2dp"
+    app:rippleColor="@color/primaryContainer">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <!-- Color Strip with Icon -->
+        <FrameLayout
+            android:layout_width="64dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/event_type_indicator">
+
+            <View
+                android:id="@+id/color_indicator"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/type_police" />
+
+            <TextView
+                android:id="@+id/txt_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:shadowColor="#40000000"
+                android:shadowDx="0"
+                android:shadowDy="2"
+                android:shadowRadius="4"
+                android:text="🚨"
+                android:textSize="28sp" />
+        </FrameLayout>
+
+        <!-- Content -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Title Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/txt_event_type"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textAppearance="@style/TextAppearance.Roadbeacon.TitleMedium"
+                    android:textColor="@color/onSurface"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="Police Check" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/outline"
+                    app:strokeWidth="1dp">
+
+                    <TextView
+                        android:id="@+id/txt_time"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingHorizontal="10dp"
+                        android:paddingVertical="4dp"
+                        android:textAppearance="@style/TextAppearance.Roadbeacon.LabelLarge"
+                        android:textColor="@color/onSurfaceVariant"
+                        android:textSize="11sp"
+                        tools:text="5 min ago" />
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- Coordinates -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:layout_marginEnd="6dp"
+                    android:alpha="0.6"
+                    android:src="@drawable/ic_location"
+                    app:tint="@color/onSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/txt_event_details"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Roadbeacon.BodyMedium"
+                    android:textColor="@color/onSurfaceVariant"
+                    android:textSize="13sp"
+                    tools:text="48.85661, 2.35222" />
+            </LinearLayout>
+
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="12dp"
+                android:background="@color/outline" />
+
+            <!-- Bottom Row: Confirmations & Expiry -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- Confirmations (clickable) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_confirmations"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="0dp"
+                    app:rippleColor="@color/status_active"
+                    app:strokeColor="@color/status_active"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="10dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/status_active"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/txt_confirmations"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:textAppearance="@style/TextAppearance.Roadbeacon.LabelLarge"
+                            android:textColor="@color/onSurface"
+                            android:textSize="12sp"
+                            tools:text="12" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Denials (clickable) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_denials"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="0dp"
+                    app:rippleColor="@color/error"
+                    app:strokeColor="@color/error"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="10dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✗"
+                            android:textColor="@color/error"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/txt_denials"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:textAppearance="@style/TextAppearance.Roadbeacon.LabelLarge"
+                            android:textColor="@color/onSurface"
+                            android:textSize="12sp"
+                            tools:text="2" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Arrow Indicator -->
+        <FrameLayout
+            android:layout_width="48dp"
+            android:layout_height="match_parent">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="center"
+                android:alpha="0.4"
+                android:src="@drawable/ic_chevron_right"
+                app:tint="@color/onSurfaceVariant" />
+        </FrameLayout>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>
