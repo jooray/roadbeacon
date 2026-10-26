@@ -1,16 +1,22 @@
-# Roadstr — Specification
+# Roadbeacon — Specification
+
+> **Status.** This is the long design document, kept for its architecture and UI sections. The
+> normative description of the event format is [`nips/road-events.md`](nips/road-events.md);
+> where the two disagree, the NIP wins. Several errors that used to be here are corrected below
+> and marked with a note. The app was called Roadstr until 0.4.0; the *format* is still v1 and
+> its `alt` text still says `"Roadstr: …"` — see [`docs/ecosystem.md`](docs/ecosystem.md).
 
 ## 1. Overview
 
-Roadstr is a decentralized road event reporting system built on the Nostr protocol. It operates as an OsmAnd plugin (Android) that allows drivers to report, confirm, and view road events (police checks, construction, closures, traffic jams, etc.) directly from the navigation interface. Events are published as signed Nostr events and displayed as color-coded map markers.
+Roadbeacon is a decentralized road event reporting system built on the Nostr protocol. It operates as an OsmAnd plugin (Android) that allows drivers to report, confirm, and view road events (police checks, construction, closures, traffic jams, etc.) directly from the navigation interface. Events are published as signed Nostr events and displayed as color-coded map markers.
 
-A compact binary encoding enables future transfer of events over MeshCore mesh networks (under 135 bytes per event), allowing off-grid propagation of road reports.
+A compact binary encoding allows events to be transferred over MeshCore mesh networks in one datagram (110 bytes for a report, 134 for a confirmation), allowing off-grid propagation of road reports.
 
 ### Design Principles
 
 - **Decentralized**: No central server. Events are published to Nostr relays.
 - **Verifiable**: All events are cryptographically signed. Any recipient can verify authenticity.
-- **Compact**: Binary representation allows mesh network transfer under 135 bytes.
+- **Compact**: Binary representation allows mesh network transfer in one 110-byte datagram.
 - **Trust-all model (v1)**: No reputation system. All users are trusted equally.
 - **Privacy-configurable**: Users choose between persistent identity or ephemeral keys.
 
@@ -83,10 +89,12 @@ Both kinds are in the regular range (1000–9999), meaning relays store them per
   "kind": 1315,
   "tags": [
     ["t", "police"],
-    ["g", "u2ed"],
-    ["g", "u2edc"],
-    ["g", "u2edcg"],
-    ["expiration", "1700007200"],
+    ["g", "u09t"],
+    ["g", "u09tv"],
+    ["g", "u09tvw"],
+    ["lat", "48.8566140"],
+    ["lon", "2.3522219"],
+    ["expiration", "1701209600"],
     ["alt", "Roadstr: police report"]
   ],
   "content": "",
@@ -140,9 +148,14 @@ The precise coordinates are encoded in the geohash tags. A 6-character geohash p
   "kind": 1316,
   "tags": [
     ["e", "<referenced-event-id-hex>"],
+    ["g", "u09t"],
+    ["g", "u09tv"],
+    ["g", "u09tvw"],
     ["status", "still_there"],
+    ["lat", "48.8566140"],
+    ["lon", "2.3522219"],
     ["expiration", "1701213200"],
-    ["alt", "Roadstr: event confirmation"]
+    ["alt", "Roadstr: event confirmed"]
   ],
   "content": "",
   "sig": "<64-byte hex signature>"
@@ -154,9 +167,15 @@ The precise coordinates are encoded in the geohash tags. A 6-character geohash p
 | # | Tag | Description |
 |---|-----|-------------|
 | 1 | `e` | Referenced event ID (the report being confirmed/denied) |
-| 2 | `status` | `"still_there"` or `"no_longer_there"` |
-| 3 | `expiration` | NIP-40 expiry timestamp (always `created_at + 1209600`) |
-| 4 | `alt` | Human-readable fallback (NIP-31) |
+| 2-4 | `g` | Geohashes of the referenced report at precision 4, 5, 6 |
+| 5 | `status` | `"still_there"` or `"no_longer_there"` |
+| 6 | `lat` | Latitude of the referenced report, 7 decimals |
+| 7 | `lon` | Longitude of the referenced report, 7 decimals |
+| 8 | `expiration` | NIP-40 expiry timestamp (always `created_at + 1209600`) |
+| 9 | `alt` | Human-readable fallback (NIP-31): `"Roadstr: event confirmed"` / `"Roadstr: event denied"` |
+
+> Corrected: earlier revisions listed only `e, status, expiration, alt`. Real events carry the
+> referenced report's geohashes and position so that one `#g` query finds report and votes.
 
 ### 3.4 Event Types (Enum)
 
@@ -177,13 +196,13 @@ The precise coordinates are encoded in the geohash tags. A 6-character geohash p
 | 12–254 | *reserved* | — | — | — |
 | 255 | `other` | 2 hours | #808080 Gray | ℹ️ |
 
-The `other` type (value 255) uses the `content` field for the type description. These are NOT compatible with the compact binary mesh format.
+The `other` type (value 255) may use the `content` field for a description. It is representable in a frame only when `content` is empty; a comment makes the event non-representable, and every type with a comment is refused by a strict encoder.
 
 ---
 
 ## 4. Compact Binary Format (Mesh-Ready)
 
-The binary format enables transfer over MeshCore mesh networks. It must be under 135 bytes and contain enough information to reconstruct a fully verifiable Nostr event.
+The binary format enables transfer over MeshCore mesh networks. It fits in one channel datagram (165 bytes is the firmware's payload limit) and contains enough information to reconstruct a fully verifiable Nostr event.
 
 ### 4.1 Design Constraints
 
@@ -193,7 +212,7 @@ The binary format enables transfer over MeshCore mesh networks. It must be under
 | Public key | 32 bytes | secp256k1 pubkey (non-negotiable for verification) |
 | **Remaining** | **39 bytes** | For timestamp, coordinates, type, metadata |
 
-### 4.2 Report Event Binary Layout (109 bytes)
+### 4.2 Report Event Binary Layout (110 bytes)
 
 ```
 Offset  Size  Field
@@ -213,14 +232,16 @@ Total: 110 bytes
 ```
 Bits 7-4: Version (0 = v1)
 Bit 3:    Event class (0 = report, 1 = confirmation)
-Bit 2:    Privacy mode (0 = persistent key, 1 = ephemeral key)
+Bit 2:    Ephemeral hint (0 = persistent key, 1 = one-time key) — NOT signed, never evidence
 Bits 1-0: Reserved
 ```
 
 **Coordinate Encoding**:
 - Latitude: `int32(lat × 10^7)` — range ±900000000, precision ~1.1cm
 - Longitude: `int32(lon × 10^7)` — range ±1800000000, precision ~1.1cm
-- Example: 48.8566140°N → `488566140` → `0x1D1D8E8C`
+- Example: 48.8566140°N → `488566140` → `0x1D1EED7C`
+- Encoding MUST read the value from the `lat`/`lon` tag text; `(lat * 1e7).toLong()` truncates and produces unverifiable frames for about 6 % of coordinates
+- Decoding MUST format from the integer (`-?D+.DDDDDDD`), never with `String.format("%.7f")`, which follows the device locale and writes a comma
 
 ### 4.3 Confirmation Event Binary Layout (134 bytes)
 
@@ -258,7 +279,9 @@ To reconstruct a full Nostr event from the binary representation:
 **For Confirmation Events:**
 
 1. Extract fields from binary
-2. Compute expiration: `created_at + 1209600` (14 days, fixed constant)
+2. Look up the referenced report (cache or relay) for its `lat`/`lon` — the frame does not carry
+   them — and reject the confirmation if its coordinates differ from the report's
+3. Compute expiration: `created_at + 1209600` (14 days, fixed constant)
 3. Assemble canonical tag array (fixed order per §3.3, including expiration tag)
 4. Set content to `""`
 5. Set kind to `1316`
@@ -271,18 +294,23 @@ To reconstruct a full Nostr event from the binary representation:
 - Latitude format: `-?[0-9]{1,2}\.[0-9]{7}` (always 7 decimal places)
 - Longitude format: `-?[0-9]{1,3}\.[0-9]{7}` (always 7 decimal places)
 
-### 4.5 Mesh Transfer Protocol (v1.5)
+### 4.5 Mesh Transport
 
-Events are transmitted on a shared MeshCore channel. The binary payload is sent as-is. Receiving nodes:
-1. Decode the binary event
-2. Reconstruct the full Nostr event
-3. Verify the signature
-4. If valid, publish to configured Nostr relays (internet bridge)
-5. Use them as if they were received over Nostr and dispay in the app
+The frame is sent unchanged as one MeshCore **channel data datagram** on the public `#roadstr`
+hashtag channel, with `data_type` `0xFF52` until a stable value is registered with MeshCore. The
+110/134 bytes fit in the 165-byte payload limit of current companion firmware; never send 166 or
+167 bytes, which pass one check and then fail permanently in the radio.
 
-Mesh nodes act as bridges between the mesh network and the Nostr relay network.
+Receiving nodes:
+1. Check length, version, reserved bits, type, coordinate range and status (cheapest checks first)
+2. Reconstruct the full Nostr event and verify its signature
+3. If valid, publish to configured Nostr relays (internet bridge) and use it as if it came from Nostr
 
-Another possibility is - if not seen on meshcore and received over Nostr, publish to MeshCore. The point is users cooperate to share in both mediums. People without internet connection get the reports through the mesh. And people publishing over mesh get their events published on nostr by internet connected people (anyone can broadcast the event, using the original nostr key, since the signature of reconstructed event is valid)
+Mesh nodes act as bridges between the mesh network and the Nostr relay network. A bridge must
+never change author, ID or signature, must de-duplicate by event ID across transports, and must
+rate-limit both directions. The authoritative parameters, refusal reasons and limits are in
+[`nips/road-events.md`](nips/road-events.md); the independent client's bridge design and the
+hardware validation checklist are in [`docs/ecosystem.md`](docs/ecosystem.md).
 
 ---
 
@@ -376,9 +404,9 @@ fun resolveConflicts(
 
 | Level | Chars | Cell Size | Use Case |
 |-------|-------|-----------|----------|
-| 4 | `u2ed` | ~20km × 20km | Regional/highway queries |
-| 5 | `u2edc` | ~5km × 5km | City-level queries |
-| 6 | `u2edcg` | ~1.2km × 0.6km | Neighborhood queries |
+| 4 | `u09t` | ~20km × 20km | Regional/highway queries |
+| 5 | `u09tv` | ~5km × 5km | City-level queries |
+| 6 | `u09tvw` | ~1.2km × 0.6km | Neighborhood queries |
 
 Each report event includes all three levels as separate `g` tags, enabling queries at different zoom levels.
 
@@ -397,7 +425,7 @@ To query events in the user's visible area:
 ```json
 {
   "kinds": [1315, 1316],
-  "#g": ["u2ed", "u2ee", "u2eb", ...],
+  "#g": ["u09k", "u09m", "u09q", "u09s", "u09t", "u09u", "u09v", "u09w", "u09y"],
   "since": <now - max_ttl>
 }
 ```
@@ -413,7 +441,7 @@ To query events in the user's visible area:
 // Primary subscription: reports in area
 ["REQ", "roadstr-reports", {
   "kinds": [1315],
-  "#g": ["u2edc", "u2edd", "u2edb", "u2ed9", "u2edf", ...],
+  "#g": ["u09ts", "u09tt", "u09tu", "u09tv", "u09tw", "u09ty", "u09wh", "u09wj", "u09wn"],
   "since": 1699993200
 }]
 
@@ -712,7 +740,7 @@ Standard WebSocket protocol:
 
 ```
 // Subscribe to events in area
-→ ["REQ", "sub1", {"kinds": [1315], "#g": ["u2edc", ...], "since": <ts>}]
+→ ["REQ", "sub1", {"kinds": [1315], "#g": ["u09tv", ...], "since": <ts>}]
 
 // Publish event
 → ["EVENT", <event-json>]
@@ -776,62 +804,44 @@ Where `serialize` produces minimal JSON (no whitespace, proper escaping per NIP-
 
 ---
 
-## 15. Binary Format — Worked Examples
+## 15. Binary Format — Worked Example
 
-### 15.1 Report Event Example
+The values below are one of the published conformance vectors (test key and signature are
+throw-away material). Earlier revisions of this section had wrong hex values and wrong
+geohashes; do not use them.
 
-**Input data:**
-- Pubkey: `a1b2c3...` (32 bytes)
-- Timestamp: `1700000000` (2023-11-14 22:13:20 UTC)
-- Latitude: `48.8566140` → int32: `488566140` → `0x1D1D8E7C`
-- Longitude: `2.3522219` → int32: `23522219` → `0x016720AB`
+**Inputs:**
+- Public key: `96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453`
+- Timestamp: `1700000000` → `0x6553F100`
+- Latitude: `48.8566140` → `488566140` → `0x1D1EED7C`
+- Longitude: `2.3522219` → `23522219` → `0x0166EBAB`
 - Type: `0` (police)
-- Signature: `d4e5f6...` (64 bytes)
+- Geohashes: `u09t`, `u09tv`, `u09tvw`
+- Expiration: `1701209600` → `0x65666600`
 
-**Binary (hex):**
+**Frame (hex):**
 ```
 00                              # v1, report, persistent key
-a1b2c3...                       # 32 bytes pubkey
-65543B80                        # created_at big-endian
-1D1D8E7C                        # latitude × 10^7
-016720AB                        # longitude × 10^7
+96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453
+6553F100                        # created_at
+1D1EED7C                        # latitude x 10^7
+0166EBAB                        # longitude x 10^7
 00                              # type: police
-d4e5f6...                       # 64 bytes signature
+a10bc13575ef963531acc54afc13445f198fe8b507d07d0fd4f2710e358bae17
+c1962feca23cc7022d31e5b813430e6ad74e3e8cc7df126d7bce45798bd0ee05
 ```
 
-**Reconstructed Nostr event:**
-```json
-{
-  "id": "<computed sha256>",
-  "pubkey": "a1b2c3...",
-  "created_at": 1700000000,
-  "kind": 1315,
-  "tags": [
-    ["t", "police"],
-    ["g", "u09t"],
-    ["g", "u09tu"],
-    ["g", "u09tun"],
-    ["lat", "48.8566140"],
-    ["lon", "2.3522219"],
-    ["expiration", "1700007200"],
-    ["alt", "Roadstr: police report"]
-  ],
-  "content": "",
-  "sig": "d4e5f6..."
-}
+**Reconstructed event ID:**
+`c4fc8b221dea97c31b73423abafde550d64d06e3b4df771c1d41ee328b3e251a`
+
+**Reconstructed tags:**
+```
+t=police  g=u09t,u09tv,u09tvw  lat=48.8566140  lon=2.3522219
+expiration=1701209600  alt="Roadstr: police report"
 ```
 
-### 15.2 Confirmation Event Example
-
-**Binary (134 bytes):**
-```
-08                              # v1, confirmation, persistent key
-b2c3d4...                       # 32 bytes pubkey (confirmer)
-65544DA0                        # created_at (1 hour later)
-<32 bytes referenced event ID>  # event being confirmed
-01                              # status: still_there
-e5f6a7...                       # 64 bytes signature
-```
+The full vector set, including invalid and non-representable cases, is published by the
+independent Roadstr client; Roadbeacon pins this vector as a unit test.
 
 ---
 
@@ -879,15 +889,17 @@ e5f6a7...                       # 64 bytes signature
 app/
 ├── src/main/
 │   ├── AndroidManifest.xml
-│   ├── kotlin/com/roadstr/
-│   │   ├── RoadstrApplication.kt
-│   │   ├── RoadstrService.kt          # Foreground service
+│   ├── kotlin/app/roadbeacon/
+│   │   ├── RoadbeaconApplication.kt
+│   │   ├── RoadbeaconService.kt       # Foreground service
 │   │   ├── nostr/
 │   │   │   ├── NostrClient.kt         # Relay WebSocket client
 │   │   │   ├── Event.kt               # Nostr event model
 │   │   │   ├── EventSigner.kt         # Signing/verification
 │   │   │   ├── Subscription.kt        # REQ/CLOSE management
-│   │   │   └── BinaryCodec.kt         # Compact binary encoder/decoder
+│   │   │   ├── BinaryCodec.kt         # Strict frame encoder/decoder
+│   │   │   ├── CanonicalCoordinates.kt # Integer E7 parse/format
+│   │   │   └── ProtocolText.kt        # Frozen v1 alt/expiration strings
 │   │   ├── model/
 │   │   │   ├── RoadEvent.kt           # Road event domain model
 │   │   │   ├── EventType.kt           # Type enum with TTL/colors
