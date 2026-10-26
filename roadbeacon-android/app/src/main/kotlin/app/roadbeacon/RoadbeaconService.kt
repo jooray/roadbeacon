@@ -15,6 +15,8 @@ import app.roadbeacon.location.LocationMonitor
 import app.roadbeacon.location.LocationStartResult
 import app.roadbeacon.model.*
 import app.roadbeacon.nostr.*
+import app.roadbeacon.mesh.MeshBridge
+import app.roadbeacon.mesh.MeshCoreApiClient
 import app.roadbeacon.osmand.MapLayerManager
 import app.roadbeacon.osmand.OsmandAidlHelper
 import app.roadbeacon.osmand.WidgetManager
@@ -65,6 +67,26 @@ class RoadbeaconService : Service() {
         app.mapLayerManager = mapLayerManager
         widgetManager = WidgetManager(this, osmandHelper, nostrClient, app.keyStore, eventCache)
 
+        if (app.settings.meshEnabled) {
+            val client = MeshCoreApiClient(app.settings, serviceScope)
+            val bridge = MeshBridge(
+                settings = app.settings,
+                api = client,
+                scope = serviceScope,
+                onInbound = { event ->
+                    when (event.kind) {
+                        1315 -> handleReportEvent(event)
+                        1316 -> handleConfirmationEvent(event)
+                    }
+                },
+                publishToRelays = { event -> nostrClient.publish(event) }
+            )
+            app.meshClient = client
+            app.meshBridge = bridge
+            bridge.start()
+            Log.i(TAG, "MeshCore bridge started: ${app.settings.meshUrl}")
+        }
+
         startForeground(NOTIFICATION_ID, createNotification())
     }
 
@@ -83,6 +105,9 @@ class RoadbeaconService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        (application as RoadbeaconApplication).meshBridge?.stop()
+        (application as RoadbeaconApplication).meshBridge = null
+        (application as RoadbeaconApplication).meshClient = null
         stopMonitoring()
         (application as RoadbeaconApplication).nostrClient = null
         (application as RoadbeaconApplication).mapLayerManager = null
@@ -237,6 +262,8 @@ class RoadbeaconService : Service() {
     }
 
     private fun handleNostrEvent(event: NostrEvent) {
+        // Offer relay events to the radio when "relay -> radio" is on.
+        (application as RoadbeaconApplication).meshBridge?.onRelayEvent(event)
         when (event.kind) {
             1315 -> handleReportEvent(event)
             1316 -> handleConfirmationEvent(event)

@@ -68,6 +68,38 @@ class Settings(context: Context) {
         get() = UnitSystem.fromStored(prefs.getString(KEY_UNIT_SYSTEM, null))
         set(value) = prefs.edit().putString(KEY_UNIT_SYSTEM, value.name.lowercase()).apply()
 
+    // ── MeshCore local API ───────────────────────────────────────────────────────────────────────
+
+    /** Master switch: connect to MeshCore Open's local API and bridge road events. */
+    var meshEnabled: Boolean
+        get() = prefs.getBoolean(KEY_MESH_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_MESH_ENABLED, value).apply()
+
+    var meshUrl: String
+        get() = prefs.getString(KEY_MESH_URL, DEFAULT_MESH_URL) ?: DEFAULT_MESH_URL
+        set(value) = prefs.edit().putString(KEY_MESH_URL, value).apply()
+
+    /** PKCS#8 private key (base64) of this app's local API identity. */
+    var meshIdentity: String?
+        get() = prefs.getString(KEY_MESH_IDENTITY, null)
+        set(value) = prefs.edit().putString(KEY_MESH_IDENTITY, value).apply()
+
+    var meshSendOwn: Boolean
+        get() = prefs.getBoolean(KEY_MESH_SEND_OWN, true)
+        set(value) = prefs.edit().putBoolean(KEY_MESH_SEND_OWN, value).apply()
+
+    var meshReceive: Boolean
+        get() = prefs.getBoolean(KEY_MESH_RECEIVE, true)
+        set(value) = prefs.edit().putBoolean(KEY_MESH_RECEIVE, value).apply()
+
+    var meshBridgeToNostr: Boolean
+        get() = prefs.getBoolean(KEY_MESH_BRIDGE_TO_NOSTR, false)
+        set(value) = prefs.edit().putBoolean(KEY_MESH_BRIDGE_TO_NOSTR, value).apply()
+
+    var meshBridgeToRadio: Boolean
+        get() = prefs.getBoolean(KEY_MESH_BRIDGE_TO_RADIO, false)
+        set(value) = prefs.edit().putBoolean(KEY_MESH_BRIDGE_TO_RADIO, value).apply()
+
     companion object {
         private const val TAG = "Settings"
         private const val PREFS_NAME = "roadbeacon_prefs"
@@ -82,6 +114,15 @@ class Settings(context: Context) {
         private const val KEY_VISIBLE_TYPES = "visible_types"
         private const val KEY_OSMAND_PACKAGE = "osmand_package"
         private const val KEY_UNIT_SYSTEM = "unit_system"
+        private const val KEY_MESH_ENABLED = "mesh_enabled"
+        private const val KEY_MESH_URL = "mesh_url"
+        private const val KEY_MESH_IDENTITY = "mesh_identity"
+        private const val KEY_MESH_SEND_OWN = "mesh_send_own"
+        private const val KEY_MESH_RECEIVE = "mesh_receive"
+        private const val KEY_MESH_BRIDGE_TO_NOSTR = "mesh_bridge_to_nostr"
+        private const val KEY_MESH_BRIDGE_TO_RADIO = "mesh_bridge_to_radio"
+
+        const val DEFAULT_MESH_URL = "ws://127.0.0.1:8787/api/v1"
 
         val DEFAULT_RELAYS = listOf(
             "wss://relay.damus.io",

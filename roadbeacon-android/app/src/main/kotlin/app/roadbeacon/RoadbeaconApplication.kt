@@ -4,6 +4,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.pm.PackageManager
+import app.roadbeacon.mesh.MeshBridge
+import app.roadbeacon.mesh.MeshCoreApiClient
 import app.roadbeacon.nostr.NostrClient
 import app.roadbeacon.osmand.MapLayerManager
 import app.roadbeacon.storage.EventCache
@@ -25,6 +27,10 @@ class RoadbeaconApplication : Application() {
 
     // Shared MapLayerManager set by the service when running
     var mapLayerManager: MapLayerManager? = null
+
+    // MeshCore local API (MeshCore Open) bridge, set by the service when running
+    var meshClient: MeshCoreApiClient? = null
+    var meshBridge: MeshBridge? = null
 
     // Observable OsmAnd connection state
     val osmandConnected = MutableStateFlow(false)

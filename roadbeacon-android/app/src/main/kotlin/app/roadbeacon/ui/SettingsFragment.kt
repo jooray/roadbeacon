@@ -5,6 +5,7 @@ import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.preference.*
 import app.roadbeacon.RoadbeaconApplication
+import app.roadbeacon.mesh.MeshApiState
 import app.roadbeacon.model.EventType
 import app.roadbeacon.util.UnitFormatter
 import app.roadbeacon.util.UnitSystem
@@ -175,6 +176,94 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
         osmandCategory.addPreference(osmandPkg)
+
+        // MeshCore (local API of MeshCore Open, same device)
+        val meshCategory = PreferenceCategory(context).apply {
+            title = "MeshCore (experimental)"
+        }
+        screen.addPreference(meshCategory)
+
+        val meshStatus = Preference(context).apply {
+            title = "Status"
+            summary = app.meshClient?.state?.value?.let { state ->
+                when (state) {
+                    is MeshApiState.Connected ->
+                        "Connected to ${state.deviceName ?: "radio"}"
+                    is MeshApiState.WaitingForApproval ->
+                        "Waiting for approval in MeshCore Open"
+                    is MeshApiState.Failed -> state.message
+                    MeshApiState.Connecting -> "Connecting…"
+                    MeshApiState.Disconnected -> "Off"
+                }
+            } ?: "Off"
+        }
+        meshCategory.addPreference(meshStatus)
+
+        val meshEnabled = SwitchPreferenceCompat(context).apply {
+            title = "Use MeshCore radio"
+            summary = "Restart the service after changing this"
+            isChecked = app.settings.meshEnabled
+            setOnPreferenceChangeListener { _, newValue ->
+                app.settings.meshEnabled = newValue as Boolean
+                true
+            }
+        }
+        meshCategory.addPreference(meshEnabled)
+
+        val meshUrl = EditTextPreference(context).apply {
+            title = "MeshCore Open API"
+            summary = app.settings.meshUrl
+            text = app.settings.meshUrl
+            dialogTitle = "ws://127.0.0.1:8787/api/v1"
+            setOnPreferenceChangeListener { pref, newValue ->
+                app.settings.meshUrl = newValue as String
+                (pref as EditTextPreference).summary = newValue
+                true
+            }
+        }
+        meshCategory.addPreference(meshUrl)
+
+        val meshSend = SwitchPreferenceCompat(context).apply {
+            title = "Send my reports by radio"
+            isChecked = app.settings.meshSendOwn
+            setOnPreferenceChangeListener { _, newValue ->
+                app.settings.meshSendOwn = newValue as Boolean
+                true
+            }
+        }
+        meshCategory.addPreference(meshSend)
+
+        val meshReceive = SwitchPreferenceCompat(context).apply {
+            title = "Show reports heard on the radio"
+            isChecked = app.settings.meshReceive
+            setOnPreferenceChangeListener { _, newValue ->
+                app.settings.meshReceive = newValue as Boolean
+                true
+            }
+        }
+        meshCategory.addPreference(meshReceive)
+
+        val meshToNostr = SwitchPreferenceCompat(context).apply {
+            title = "Bridge: radio → Nostr"
+            summary = "Republish what is heard, with the original author"
+            isChecked = app.settings.meshBridgeToNostr
+            setOnPreferenceChangeListener { _, newValue ->
+                app.settings.meshBridgeToNostr = newValue as Boolean
+                true
+            }
+        }
+        meshCategory.addPreference(meshToNostr)
+
+        val nostrToMesh = SwitchPreferenceCompat(context).apply {
+            title = "Bridge: Nostr → radio"
+            summary = "Broadcast nearby relay reports on the radio"
+            isChecked = app.settings.meshBridgeToRadio
+            setOnPreferenceChangeListener { _, newValue ->
+                app.settings.meshBridgeToRadio = newValue as Boolean
+                true
+            }
+        }
+        meshCategory.addPreference(nostrToMesh)
 
         preferenceScreen = screen
     }

@@ -245,6 +245,7 @@ class ReportDialogActivity : AppCompatActivity() {
 
                     val client = app.nostrClient
                     if (client != null && client.getConnectedCount() > 0) {
+                        app.meshBridge?.onOwnEvent(event)
                         client.publish(event) { accepted, total ->
                             scope.launch(Dispatchers.Main) {
                                 Toast.makeText(
@@ -260,6 +261,7 @@ class ReportDialogActivity : AppCompatActivity() {
                         val tempClient = NostrClient(tempScope)
                         tempClient.connect(app.settings.relays)
                         delay(3000)
+                        app.meshBridge?.onOwnEvent(event)
                         tempClient.publish(event) { accepted, total ->
                             scope.launch(Dispatchers.Main) {
                                 Toast.makeText(

@@ -297,6 +297,7 @@ class MainActivity : AppCompatActivity() {
 
         val confirmEvent = EventSigner.createConfirmationEvent(event.id, status, privKey)
         nostrClient.publish(confirmEvent)
+        app.meshBridge?.onOwnEvent(confirmEvent)
 
         val message = if (status == ConfirmationStatus.STILL_THERE) "Confirmed" else "Denied"
         Toast.makeText(this, "$message: ${event.type.displayName}", Toast.LENGTH_SHORT).show()

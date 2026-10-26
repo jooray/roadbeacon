@@ -3,6 +3,7 @@ package app.roadbeacon.osmand
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import app.roadbeacon.RoadbeaconApplication
 import app.roadbeacon.model.ConfirmationStatus
 import app.roadbeacon.nostr.EventSigner
 import app.roadbeacon.nostr.NostrClient
@@ -131,6 +132,7 @@ class WidgetManager(
         Log.i(TAG, "Publishing confirmation: status=${status.value} for event=$pointId")
         val event = EventSigner.createConfirmationEvent(pointId, status, privKey)
         nostrClient.publish(event)
+        (context.applicationContext as? RoadbeaconApplication)?.meshBridge?.onOwnEvent(event)
         Log.i(TAG, "Confirmation published: eventId=${event.id.take(8)}")
     }
 
