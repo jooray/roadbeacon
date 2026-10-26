@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val confirmEvent = EventSigner.createConfirmationEvent(event.id, status, event.lat, event.lon, privKey)
+        val confirmEvent = EventSigner.createConfirmationEvent(event.id, status, privKey)
         nostrClient.publish(confirmEvent)
 
         val message = if (status == ConfirmationStatus.STILL_THERE) "Confirmed" else "Denied"
@@ -383,6 +383,7 @@ class EventAdapter(
 
     private fun getEmojiForType(type: EventType): String = when (type) {
         EventType.POLICE -> "👮"
+        EventType.POLICE_STATION -> "🏛️"
         EventType.SPEED_CAMERA -> "📷"
         EventType.TRAFFIC_JAM -> "🚗"
         EventType.ACCIDENT -> "💥"
@@ -394,6 +395,7 @@ class EventAdapter(
         EventType.FOG -> "🌫️"
         EventType.ICE -> "🧊"
         EventType.ANIMAL -> "🦌"
+        EventType.SURVEILLANCE_CAMERA -> "🎥"
         EventType.OTHER -> "ℹ️"
     }
 

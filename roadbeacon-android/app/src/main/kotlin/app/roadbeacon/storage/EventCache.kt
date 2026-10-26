@@ -73,7 +73,8 @@ class EventCache {
         val baseTTL = report.type.defaultTTL
         var effectiveExpiry = report.createdAt + baseTTL
 
-        val sorted = confs.sortedBy { it.createdAt }
+        // A vote cannot predate its report; ignore anything older.
+        val sorted = confs.filter { it.createdAt >= report.createdAt }.sortedBy { it.createdAt }
 
         for (conf in sorted) {
             when (conf.status) {
@@ -87,6 +88,10 @@ class EventCache {
             }
         }
 
+        // Relays stop serving the event at its `expiration`; a marker must not outlive the data.
+        if (report.expiration > 0) {
+            effectiveExpiry = minOf(effectiveExpiry, report.expiration)
+        }
         return effectiveExpiry
     }
 

@@ -72,6 +72,7 @@ class ReportDialogActivity : AppCompatActivity() {
 
     private fun getEmoji(type: EventType): String = when (type) {
         EventType.POLICE -> "\uD83D\uDC6E"
+        EventType.POLICE_STATION -> "\uD83C\uDFDB\uFE0F"
         EventType.SPEED_CAMERA -> "\uD83D\uDCF7"
         EventType.TRAFFIC_JAM -> "\uD83D\uDE97"
         EventType.ACCIDENT -> "\uD83D\uDCA5"
@@ -83,6 +84,7 @@ class ReportDialogActivity : AppCompatActivity() {
         EventType.FOG -> "\uD83C\uDF2B"
         EventType.ICE -> "\uD83E\uDDCA"
         EventType.ANIMAL -> "\uD83E\uDD8C"
+        EventType.SURVEILLANCE_CAMERA -> "\uD83C\uDFA5"
         EventType.OTHER -> "\u2139\uFE0F"
     }
 

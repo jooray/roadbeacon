@@ -1,6 +1,7 @@
 package app.roadbeacon.storage
 
 import app.roadbeacon.model.*
+import app.roadbeacon.nostr.RoadEventFormat
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -183,7 +184,7 @@ class EventCacheTest {
             lat = 48.8566,
             lon = 2.3522,
             createdAt = createdAt,
-            expiration = createdAt + type.defaultTTL,
+            expiration = RoadEventFormat.expirationFor(createdAt, type),
             content = ""
         )
     }

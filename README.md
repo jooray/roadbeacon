@@ -19,9 +19,9 @@ I write about building things on [my blog](https://juraj.bednar.io/en/blog-en/).
 Roadbeacon lets drivers report and view road events (police, accidents, construction, hazards) using the Nostr protocol. Events are cryptographically signed, verifiable, and shared across a decentralized network of relays. No central authority, no tracking, no data harvesting.
 
 Formerly called Roadstr. The app was renamed to avoid confusion with the independent
-[Roadstr navigation app](https://github.com/roadstrapp/roadstr-app); the **event format** keeps its
-original name and its original bytes, because those are shared with that app. See
-[`docs/ecosystem.md`](docs/ecosystem.md) for the whole story and the plan for the two apps.
+[Roadstr navigation app](https://github.com/roadstrapp/roadstr-app), and 0.4.0 adopted that app's
+event layout so both clients write the same bytes. See [`docs/ecosystem.md`](docs/ecosystem.md) for
+the whole story and the plan for the two apps.
 
 ### [Web Version](https://cypherpunk.today/static/roadstr)
 
@@ -38,12 +38,12 @@ Left: Android app, Right: OsmAnd integration showing events and Report button
 - **Decentralized**: Events published to Nostr relays, no central server
 - **Verifiable**: All events cryptographically signed with secp256k1 Schnorr signatures
 - **Privacy-aware**: Use persistent identity or ephemeral keys per event
-- **Mesh-ready**: Compact binary format (110/134 bytes) designed for MeshCore transport, with a strict encoder that refuses anything that cannot be rebuilt byte for byte
+- **Mesh-ready**: Compact binary format (117–165 bytes for a report, 134 for a vote) designed for MeshCore transport, with a strict encoder that refuses anything that cannot be rebuilt byte for byte
 - **Android + Web**: OsmAnd plugin for in-car navigation, browser interface for browsing
 
 ### Event Types
 
-Police, speed cameras, traffic jams, accidents, road closures, construction, hazards, road conditions, potholes, fog, ice, animals, and custom events.
+Police, police stations, speed cameras, surveillance cameras, traffic jams, accidents, road closures, construction, hazards, road conditions, potholes, fog, ice, animals, and custom events.
 
 ### Confirmation System
 
@@ -52,6 +52,8 @@ Drivers can confirm ("still there") or deny ("no longer there") existing reports
 ## How It Works
 
 Events are published as Nostr events (kind 1315 for reports, 1316 for confirmations) with geohash tags for efficient spatial querying. The protocol is designed to work both over internet (Nostr relays) and off-grid mesh networks (MeshCore). Mesh nodes can bridge between networks, allowing internet-connected users to publish events received via mesh, and vice versa.
+
+0.4.0 writes the same event layout as the independent [Roadstr navigation app](https://github.com/roadstrapp/roadstr-app): `lat, lon, g, g, g, t, expiration[, maxspeed]` with six-decimal coordinates, no `alt`, and two-tag votes (`e, status`). The previous layout is deprecated and no longer read or written.
 
 ## Platforms
 
@@ -117,10 +119,9 @@ Roadbeacon uses two new Nostr event kinds:
 - **Kind 1315**: Road event reports (police, accidents, hazards, etc.)
 - **Kind 1316**: Confirmations/denials of existing reports
 
-Events include geohash tags at multiple precision levels (4, 5, 6 characters) for efficient spatial querying. The compact binary encoding (110/134 bytes) enables mesh network transport while preserving cryptographic verifiability.
+Reports include geohash tags at multiple precision levels (4, 5, 6 characters) for efficient spatial querying; votes are two tags and are fetched by `#e` for the reports in view. The compact binary encoding (117–165 bytes for a report including up to 48 bytes of comment, 134 for a self-contained vote) enables mesh transport while preserving cryptographic verifiability.
 
-See `nips/road-events.md` for the draft NIP specification. The format is called **Road Events**;
-the `"Roadstr: …"` text inside v1 events is a frozen format constant, not branding.
+See `nips/road-events.md` for the specification. The format is called **Road Events** and carries no brand in any event.
 
 ## Documentation
 

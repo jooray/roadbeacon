@@ -2,29 +2,34 @@
 // Kind 1315 = road event report
 // Kind 1316 = confirmation/denial
 //
-// The `alt` strings below deliberately say "Roadstr". They are part of the signed event and of
-// the 110-byte frame format v1, which another independent client already implements; changing
-// them changes every event ID and makes the event impossible to put on a radio. See
-// docs/ecosystem.md.
+// The layout is the shared one, written natively by the independent Roadstr client:
+//   report: lat, lon, g4, g5, g6, t, expiration[, maxspeed]   (no alt, six decimals)
+//   vote:   e, status
+// The `expiration` tag is created_at + max(14 days, type lifetime), so votes can extend a report.
+// See docs/ecosystem.md and nips/road-events.md.
 
 import { encode as geohashEncode } from './geohash.js';
 
-export const RELAY_TTL = 1209600; // 14 days in seconds
+/** Floor for relay-side retention (NIP-40): 14 days. */
+export const RELAY_TTL = 1209600;
 
+/** The shared category registry: byte value in the frame, `t` tag string, display lifetime. */
 export const EVENT_TYPES = [
-  { value: 0, string: 'police', defaultTTL: 7200, color: '#0000FF', icon: '\u{1F46E}' },
-  { value: 1, string: 'speed_camera', defaultTTL: 2592000, color: '#800080', icon: '\u{1F4F7}' },
+  { value: 0, string: 'police', defaultTTL: 4 * 3600, color: '#0000FF', icon: '\u{1F46E}' },
+  { value: 12, string: 'police_station', defaultTTL: 30 * 86400, color: '#1E3A8A', icon: '\u{1F3DB}\uFE0F' },
+  { value: 1, string: 'speed_camera', defaultTTL: 30 * 86400, color: '#800080', icon: '\u{1F4F7}' },
   { value: 2, string: 'traffic_jam', defaultTTL: 3600, color: '#FF8C00', icon: '\u{1F697}' },
-  { value: 3, string: 'accident', defaultTTL: 10800, color: '#FF0000', icon: '\u{1F4A5}' },
-  { value: 4, string: 'road_closure', defaultTTL: 604800, color: '#8B0000', icon: '\u{1F6AB}' },
-  { value: 5, string: 'construction', defaultTTL: 604800, color: '#FFD700', icon: '\u{1F6A7}' },
-  { value: 6, string: 'hazard', defaultTTL: 14400, color: '#FF4500', icon: '\u26A0\uFE0F' },
-  { value: 7, string: 'road_condition', defaultTTL: 21600, color: '#4682B4', icon: '\u{1F6E3}\uFE0F' },
-  { value: 8, string: 'pothole', defaultTTL: 604800, color: '#795548', icon: '\u{1F573}\uFE0F' },
-  { value: 9, string: 'fog', defaultTTL: 10800, color: '#9E9E9E', icon: '\u{1F32B}\uFE0F' },
-  { value: 10, string: 'ice', defaultTTL: 21600, color: '#00CED1', icon: '\u{1F9CA}' },
+  { value: 3, string: 'accident', defaultTTL: 4 * 3600, color: '#FF0000', icon: '\u{1F4A5}' },
+  { value: 4, string: 'road_closure', defaultTTL: 24 * 3600, color: '#8B0000', icon: '\u{1F6AB}' },
+  { value: 5, string: 'construction', defaultTTL: 15 * 86400, color: '#FFD700', icon: '\u{1F6A7}' },
+  { value: 6, string: 'hazard', defaultTTL: 4 * 3600, color: '#FF4500', icon: '\u26A0\uFE0F' },
+  { value: 7, string: 'road_condition', defaultTTL: 15 * 86400, color: '#4682B4', icon: '\u{1F6E3}\uFE0F' },
+  { value: 8, string: 'pothole', defaultTTL: 7 * 86400, color: '#795548', icon: '\u{1F573}\uFE0F' },
+  { value: 9, string: 'fog', defaultTTL: 4 * 3600, color: '#9E9E9E', icon: '\u{1F32B}\uFE0F' },
+  { value: 10, string: 'ice', defaultTTL: 4 * 3600, color: '#00CED1', icon: '\u{1F9CA}' },
   { value: 11, string: 'animal', defaultTTL: 3600, color: '#4CAF50', icon: '\u{1F98C}' },
-  { value: 255, string: 'other', defaultTTL: 7200, color: '#808080', icon: '\u2139\uFE0F' }
+  { value: 13, string: 'surveillance_camera', defaultTTL: 30 * 86400, color: '#4C1D95', icon: '\u{1F3A5}' },
+  { value: 255, string: 'other', defaultTTL: 4 * 3600, color: '#808080', icon: '\u2139\uFE0F' }
 ];
 
 export function getTypeByString(str) {
@@ -35,6 +40,11 @@ export function getTypeByValue(val) {
   return EVENT_TYPES.find(t => t.value === val) || null;
 }
 
+/** Relay retention for a report: never shorter than its own lifetime. */
+export function expirationFor(typeInfo, createdAt) {
+  return createdAt + Math.max(RELAY_TTL, typeInfo.defaultTTL);
+}
+
 /**
  * Create an unsigned kind 1315 road event report.
  */
@@ -43,18 +53,21 @@ export function createReportEvent(typeValue, lat, lon, content = '', createdAt =
   const typeInfo = getTypeByValue(typeValue);
   if (!typeInfo) throw new Error(`Unknown event type value: ${typeValue}`);
 
-  const geohashes = [4, 5, 6].map(p => geohashEncode(lat, lon, p));
-  const expiration = now + RELAY_TTL;
+  // Six decimals: the value a frame carries and prints back. Geohashes use the same text.
+  const latText = lat.toFixed(6);
+  const lonText = lon.toFixed(6);
+  const latRounded = parseFloat(latText);
+  const lonRounded = parseFloat(lonText);
+  const geohashes = [4, 5, 6].map(p => geohashEncode(latRounded, lonRounded, p));
 
   const tags = [
-    ['t', typeInfo.string],
+    ['lat', latText],
+    ['lon', lonText],
     ['g', geohashes[0]],
     ['g', geohashes[1]],
     ['g', geohashes[2]],
-    ['lat', lat.toFixed(7)],
-    ['lon', lon.toFixed(7)],
-    ['expiration', String(expiration)],
-    ['alt', `Roadstr: ${typeInfo.string} report`]
+    ['t', typeInfo.string],
+    ['expiration', String(expirationFor(typeInfo, now))]
   ];
 
   return {
@@ -66,40 +79,25 @@ export function createReportEvent(typeValue, lat, lon, content = '', createdAt =
 }
 
 /**
- * Create an unsigned kind 1316 confirmation/denial event.
+ * Create an unsigned kind 1316 confirmation/denial event. A vote carries no position: two tags.
  * @param {string} eventId - The event ID being confirmed/denied
  * @param {string} status - Either 'still_there' or 'no_longer_there'
- * @param {number} lat - Latitude of the referenced report (for geohash tags)
- * @param {number} lon - Longitude of the referenced report (for geohash tags)
  * @param {number} [createdAt] - Optional timestamp (defaults to now)
  */
-export function createConfirmationEvent(eventId, status, lat, lon, createdAt = null) {
+export function createConfirmationEvent(eventId, status, createdAt = null) {
   const now = createdAt || Math.floor(Date.now() / 1000);
 
   if (status !== 'still_there' && status !== 'no_longer_there') {
     throw new Error(`Invalid status: ${status}. Must be "still_there" or "no_longer_there".`);
   }
 
-  const geohashes = [4, 5, 6].map(p => geohashEncode(lat, lon, p));
-  const altText = status === 'still_there' ? 'Roadstr: event confirmed' : 'Roadstr: event denied';
-  const expiration = now + RELAY_TTL; // 14 days per spec
-
-  const tags = [
-    ['e', eventId],
-    ['g', geohashes[0]],
-    ['g', geohashes[1]],
-    ['g', geohashes[2]],
-    ['status', status],
-    ['lat', lat.toFixed(7)],
-    ['lon', lon.toFixed(7)],
-    ['expiration', String(expiration)],
-    ['alt', altText]
-  ];
-
   return {
     kind: 1316,
     created_at: now,
-    tags,
+    tags: [
+      ['e', eventId],
+      ['status', status]
+    ],
     content: ''
   };
 }
@@ -113,14 +111,12 @@ export function parseReportEvent(event) {
   const typeTag = event.tags.find(t => t[0] === 't');
   const gTags = event.tags.filter(t => t[0] === 'g');
   const expTag = event.tags.find(t => t[0] === 'expiration');
-  const altTag = event.tags.find(t => t[0] === 'alt');
 
   if (!typeTag || gTags.length === 0) return null;
 
   const typeInfo = getTypeByString(typeTag[1]);
   if (!typeInfo) return null;
 
-  // Extract coordinates from lat/lon tags
   const latTag = event.tags.find(t => t[0] === 'lat');
   const lonTag = event.tags.find(t => t[0] === 'lon');
   const lat = latTag ? parseFloat(latTag[1]) : null;
@@ -141,9 +137,9 @@ export function parseReportEvent(event) {
 
 /**
  * Compute effective TTL expiry timestamp given confirmations/denials.
- * Per NIP spec:
  * - still_there: extends expiry from confirmation time + defaultTTL
- * - no_longer_there: immediately expires at confirmation time
+ * - no_longer_there: expires at confirmation time
+ * Never later than the event's own `expiration`: a marker must not outlive the data.
  */
 export function computeEffectiveTTL(report, confirmations = []) {
   const typeInfo = report.type || getTypeByString(report.typeString);
@@ -152,21 +148,24 @@ export function computeEffectiveTTL(report, confirmations = []) {
   const baseTTL = typeInfo.defaultTTL;
   let effectiveExpiry = report.createdAt + baseTTL;
 
-  // Sort confirmations by timestamp for deterministic processing
-  const sorted = [...confirmations].sort((a, b) => a.created_at - b.created_at);
+  // A vote cannot predate its report. Sort the rest by timestamp for deterministic processing.
+  const sorted = [...confirmations]
+    .filter(c => c.created_at >= report.createdAt)
+    .sort((a, b) => a.created_at - b.created_at);
 
   for (const c of sorted) {
     const statusTag = c.tags.find(t => t[0] === 'status');
     if (!statusTag) continue;
 
     if (statusTag[1] === 'still_there') {
-      // Extend expiry from confirmation time
-      const newExpiry = c.created_at + baseTTL;
-      effectiveExpiry = Math.max(effectiveExpiry, newExpiry);
+      effectiveExpiry = Math.max(effectiveExpiry, c.created_at + baseTTL);
     } else if (statusTag[1] === 'no_longer_there') {
-      // Immediately expire at denial time
       effectiveExpiry = Math.min(effectiveExpiry, c.created_at);
     }
+  }
+
+  if (report.expiration) {
+    effectiveExpiry = Math.min(effectiveExpiry, report.expiration);
   }
 
   return effectiveExpiry;

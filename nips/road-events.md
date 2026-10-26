@@ -14,36 +14,34 @@ Road events include police checks, speed cameras, accidents, traffic jams, road 
 construction zones, and other hazards. Events are anchored to geographic locations using geohash
 tags, enabling spatial querying by clients.
 
-**Version.** This document describes **v1** of the format. Its canonical text is frozen: the `alt`
-tag says `"Roadstr: …"` and that string is part of every v1 event ID. It is a format constant, not
-an app name — clients must reproduce it exactly. A brand-neutral v2, with self-contained
-confirmations, is proposed in [`docs/ecosystem.md`](../docs/ecosystem.md).
-
-**Implementations.** [Roadbeacon](../README.md) (OsmAnd plugin and web client) and
-[Roadstr](https://github.com/roadstrapp/roadstr-app) (an independent navigation app, which also
-publishes the conformance vectors this document is checked against). References to
-[`docs/interoperability/MESHCORE_NOSTR.md`](https://github.com/roadstrapp/roadstr-app/blob/main/docs/interoperability/MESHCORE_NOSTR.md)
-below point at that project's independent audit of this format, including a read-only probe of 138
-real events on public relays.
+**One layout, two implementations.** The tag layout below is the one the independent
+[Roadstr](https://github.com/roadstrapp/roadstr-app) client writes natively, specified here once so
+that both clients (and any third one) agree on the bytes. It replaces the earlier `jooray/roadstr`
+layout, which is deprecated (see [Appendix A](#appendix-a--the-deprecated-layout)). There is no
+`alt` tag: the format carries no brand and no redundant position data.
 
 ## Road Event Report (kind 1315)
 
 A road event report signals the presence of a notable condition at a specific geographic location.
 
-The `.content` field is a plain-text optional comment (e.g., `"Checking seatbelts"`). An empty
-string `""` indicates no comment. **An event with a non-empty comment cannot be represented in the
-compact binary form** (see [Compact Binary Representation](#compact-binary-representation)).
+The `.content` field is a plain-text optional comment (e.g., `"Checking seatbelts"`). A comment is
+carried in the event and, up to 48 UTF-8 bytes, in the compact frame; longer comments are valid on
+relays but cannot be represented in a frame.
 
 ### Tags
 
-The following tags MUST appear in this canonical order:
+The following tags MUST appear in exactly this order:
 
-- `t` (required) event type string from the defined enum (see [Event Types](#event-types))
-- `g` (required, repeated) geohash of the position at precision levels 4, 5, and 6 characters. Levels 4-6 enable efficient spatial querying.
-- `lat` (required) latitude as decimal string with exactly 7 decimal places (e.g., `"48.8566140"`)
-- `lon` (required) longitude as decimal string with exactly 7 decimal places (e.g., `"2.3522219"`)
-- `expiration` (required) Unix timestamp, always computed as `created_at + 1209600` (14 days). Per [NIP-40](40.md), relays SHOULD delete the event after this time. See [Expiration](#expiration).
-- `alt` (optional) human-readable fallback per [NIP-31](31.md). If present, MUST be exactly `"Roadstr: <type_string> report"`.
+- `lat` (required) latitude as a decimal string with exactly 6 decimal places (e.g., `"48.856614"`)
+- `lon` (required) longitude as a decimal string with exactly 6 decimal places (e.g., `"2.352222"`)
+- `g` (required, repeated) geohash of the position at precision levels 4, 5 and 6, in that order
+- `t` (required) category string from the registry (see [Categories](#categories))
+- `expiration` (required) Unix timestamp, `created_at + max(1209600, lifetime)` — see [Expiration](#expiration)
+- `maxspeed` (optional) speed limit in km/h, an integer 5–300, no leading zeros. Only meaningful for
+  `speed_camera`, but the tag is allowed on any report.
+
+Six decimals is ~11 cm, far below GPS accuracy, and is the precision the frame reproduces exactly.
+Seven decimals (the old layout) is not canonical here.
 
 ### Example
 
@@ -54,47 +52,35 @@ The following tags MUST appear in this canonical order:
   "created_at": 1700000000,
   "kind": 1315,
   "tags": [
-    ["t", "police"],
+    ["lat", "48.856614"],
+    ["lon", "2.352222"],
     ["g", "u09t"],
     ["g", "u09tv"],
     ["g", "u09tvw"],
-    ["lat", "48.8566140"],
-    ["lon", "2.3522219"],
-    ["expiration", "1701209600"],
-    ["alt", "Roadstr: police report"]
+    ["t", "police"],
+    ["expiration", "1701209600"]
   ],
   "content": "",
   "sig": "<64-bytes hex-encoded signature>"
 }
 ```
 
-The geohashes above were recomputed from the coordinates: 48.8566140, 2.3522219 is in `u09t`,
-`u09tv`, `u09tvw`. Earlier revisions of this document printed `u2ed*`, which is wrong.
+Geohashes MUST be derived from the same six-decimal value that `lat`/`lon` name
+(precision 4, 5, 6, `>=` on the midpoint, alphabet `0123456789bcdefghjkmnpqrstuvwxyz`).
 
 ## Road Event Confirmation (kind 1316)
 
 A confirmation event indicates whether a previously reported road event is still present or has
 cleared. Any user passing the reported location can publish a confirmation.
 
-The `.content` field is a plain-text optional comment. An empty string `""` indicates no comment.
+A vote carries **no position, no expiration and no `alt`**: it is two tags and an empty `.content`.
 
 ### Tags
 
 The following tags MUST appear in this canonical order:
 
 - `e` (required) event ID of the kind 1315 report being confirmed or denied
-- `g` (required, repeated) geohash at precision levels 4, 5, and 6 characters. MUST match the geohashes of the referenced report.
 - `status` (required) either `"still_there"` or `"no_longer_there"`
-- `lat` (required) latitude as decimal string with exactly 7 decimal places. MUST match the referenced report.
-- `lon` (required) longitude as decimal string with exactly 7 decimal places. MUST match the referenced report.
-- `expiration` (required) Unix timestamp, always `created_at + 1209600` (14 days)
-- `alt` (optional) human-readable fallback. If present, MUST be:
-  - `"Roadstr: event confirmed"` when status is `still_there`
-  - `"Roadstr: event denied"` when status is `no_longer_there`
-
-Note: The `g`, `lat`, and `lon` tags duplicate the location from the referenced report. This enables
-efficient spatial querying of both reports and confirmations using a single `#g` filter. A receiver
-MUST drop a confirmation whose coordinates differ from its report's.
 
 ### Example
 
@@ -106,210 +92,195 @@ MUST drop a confirmation whose coordinates differ from its report's.
   "kind": 1316,
   "tags": [
     ["e", "<id of the kind 1315 report>"],
-    ["g", "u09t"],
-    ["g", "u09tv"],
-    ["g", "u09tvw"],
-    ["status", "still_there"],
-    ["lat", "48.8566140"],
-    ["lon", "2.3522219"],
-    ["expiration", "1701213200"],
-    ["alt", "Roadstr: event confirmed"]
+    ["status", "still_there"]
   ],
   "content": "",
   "sig": "<64-bytes hex-encoded signature>"
 }
 ```
 
-## Event Types
+Consequences:
 
-The `t` tag value MUST be one of the following strings:
+- Votes are found by `#e` with the IDs of the reports a client is showing, not by area. Clients
+  MUST NOT expect `#g` to find them. (A vote without a position cannot be area-queried, and that is
+  a deliberate trade: it makes the 134-byte vote frame self-contained.)
+- A vote has no NIP-40 `expiration`; relays keep it unless they apply their own policy. Clients MUST
+  ignore votes older than their report and votes more than 5 minutes in the future.
 
-| Value | String              | Default Effective TTL |
-|-------|---------------------|----------------------|
-| 0     | `police`            | 2 hours              |
-| 1     | `speed_camera`      | 30 days              |
-| 2     | `traffic_jam`       | 1 hour               |
-| 3     | `accident`          | 3 hours              |
-| 4     | `road_closure`      | 7 days               |
-| 5     | `construction`      | 7 days               |
-| 6     | `hazard`            | 4 hours              |
-| 7     | `road_condition`    | 6 hours              |
-| 8     | `pothole`           | 7 days               |
-| 9     | `fog`               | 3 hours              |
-| 10    | `ice`               | 6 hours              |
-| 11    | `animal`            | 1 hour               |
-| 255   | `other`             | 2 hours              |
-| 12–254 | reserved          | —                    |
+## Categories
 
-The numeric "Value" column is used only in the compact binary representation. In Nostr events, the
-string form is always used in the `t` tag.
+The `t` tag value MUST be one of these strings; the numeric value is the byte used in the frame.
+
+| Value | String | Display lifetime |
+|---|---|---|
+| 0 | `police` | 4 hours |
+| 1 | `speed_camera` | 30 days |
+| 2 | `traffic_jam` | 1 hour |
+| 3 | `accident` | 4 hours |
+| 4 | `road_closure` | 24 hours |
+| 5 | `construction` | 15 days |
+| 6 | `hazard` | 4 hours |
+| 7 | `road_condition` | 15 days |
+| 8 | `pothole` | 7 days |
+| 9 | `fog` | 4 hours |
+| 10 | `ice` | 4 hours |
+| 11 | `animal` | 1 hour |
+| 12 | `police_station` | 30 days |
+| 13 | `surveillance_camera` | 30 days |
+| 14–254 | reserved | — |
+| 255 | `other` | 4 hours |
 
 Reserved values MUST NOT be mapped to `other` when decoding: that would change the `t` tag and with
-it the event ID. Drop the frame instead. (`docs/ecosystem.md` proposes assigning 12
-`police_station` and 13 `surveillance_camera` in v2.)
+it the event ID. Drop the event or frame instead.
 
-The "Default Effective TTL" is used by clients to determine how long to display a marker. It is NOT
-the relay-side expiration (see [Expiration](#expiration)). It applies to events **in this layout
-only**: a client that also understands another client's layout must use that layout's lifetimes for
-those events, and label their provenance.
+The numeric values are part of the wire format; renaming or renumbering a category changes every
+event that uses it. Adding a category means a new value and a vectors bump.
 
 ## Expiration
 
-This NIP distinguishes between two expiration concepts:
+Two lifetimes exist and are often confused:
 
-### Relay-side expiration (NIP-40)
+### Relay-side retention (NIP-40)
 
-The `expiration` tag is always set to `created_at + 1209600` (14 days). This is a fixed constant for
-all event types. It tells relays when to garbage-collect the event. The 14-day window is long enough
-that confirmations can extend the effective lifetime of an event without the underlying data being
-deleted.
+The `expiration` tag tells relays when they may delete the event. It MUST be
+`created_at + max(1209600, lifetime)` — 14 days for most categories, 30 days for the long-lived ones
+(`speed_camera`, `police_station`, `surveillance_camera`).
 
-### Effective TTL (client-side)
+The 14-day floor exists so that votes can extend a report: if relays dropped a police report after
+its 4-hour lifetime, a "still there" at hour five would have nothing to extend. It MUST NOT be
+shorter than the category's own lifetime.
 
-Clients compute an _effective expiration_ from the event type's default TTL and any confirmations
-received:
+Readers MUST accept any `expiration` value they can parse and MUST NOT reject an event because the
+tag does not match this rule: older clients wrote `created_at + lifetime`, and those events are
+valid.
 
-1. Base effective expiry = `created_at + default_ttl` (from the event types table)
-2. Each `still_there` confirmation extends the effective expiry: `max(effective_expiry, confirmation.created_at + default_ttl)`
-3. Each `no_longer_there` confirmation reduces it: `min(effective_expiry, confirmation.created_at)`
+### Display lifetime (client-side)
 
-Clients SHOULD NOT display markers whose effective expiry has passed, even if the relay-side
-expiration has not yet been reached. Only the latest vote of a key counts; a vote older than its
-report, or more than five minutes in the future, is ignored; when two votes share a timestamp,
-denials are applied first so that a tie keeps the report alive.
+```
+expiry = created_at + lifetime(type)
+for vote in votes, ordered by (created_at, denial before confirmation):
+    still_there     -> expiry = max(expiry, vote.created_at + lifetime)
+    no_longer_there -> expiry = min(expiry, vote.created_at)
+expiry = min(expiry, expiration)
+```
+
+Choices the specification leaves open, made once:
+
+- one voice per key: only the latest vote of a key counts;
+- a vote older than its report, or more than 5 minutes in the future, is ignored;
+- votes with the same timestamp are applied denials first, so a tie keeps the report alive;
+- a report is hidden while the **last five minutes** contain more denials than confirmations (a tie
+  stays visible).
+
+A client MUST NOT show a marker past the event's `expiration`: the data may no longer be served.
 
 ## Geohash Querying
 
-Both reports and confirmations include geohash tags at multiple precision levels to enable efficient
-spatial filtering:
+| Precision | Cell size | Use |
+|---|---|---|
+| 4 chars | ~20 km × 20 km | highway / regional |
+| 5 chars | ~5 km × 5 km | city |
+| 6 chars | ~1.2 km × 0.6 km | neighbourhood |
 
-| Precision | Cell Size         | Use Case                  |
-|-----------|-------------------|---------------------------|
-| 4 chars   | ~20km x 20km     | Highway / regional queries |
-| 5 chars   | ~5km x 5km       | City-level queries         |
-| 6 chars   | ~1.2km x 0.6km   | Neighborhood queries       |
-
-Precise coordinates are provided via the `lat` and `lon` tags. Geohashes MUST be derived from those
-coordinates (precision 4, 5, 6, `>=` on the midpoint, alphabet
-`0123456789bcdefghjkmnpqrstuvwxyz`); a report whose `g` tags disagree with its coordinates is
-malformed.
-
-Clients SHOULD query using the `#g` filter at a precision level appropriate to its context (zoom
-level, vehicle speed, etc.) and include the center cell plus its 8 neighbors to avoid boundary
-effects. The `since` value of a cold-start query SHOULD cover the longest default TTL (30 days), not
-a fixed 24 hours, or valid long-lived reports will be hidden.
-
-Since both reports (1315) and confirmations (1316) have geohash tags, clients can fetch both in a
-single query:
+Clients query reports with `#g` at a precision appropriate to zoom or speed, including the centre
+cell and its eight neighbours, then fetch votes with `#e` for the report IDs they show:
 
 ```json
-["REQ", "road-events", {
-  "kinds": [1315, 1316],
-  "#g": ["u09tvw", "u09tvx", "u09tvn", "u09tvj", "u09tvs", "u09tvt", "u09tvu", "u09tvv", "u09tvy"],
+["REQ", "road-reports", {
+  "kinds": [1315],
+  "#g": ["u09ts", "u09tt", "u09tu", "u09tv", "u09tw", "u09ty", "u09wh", "u09wj", "u09wn"],
   "since": 1699993200
+}]
+
+["REQ", "road-votes", {
+  "kinds": [1316],
+  "#e": ["<visible report id>", "…"]
 }]
 ```
 
-This returns all reports and their confirmations for the specified area in a single round-trip,
-enabling clients to compute effective TTL before displaying markers.
+The `since` value of a cold-start query SHOULD cover the longest display lifetime (30 days), not a
+fixed 24 hours, or valid long-lived reports will be hidden.
 
 ## Compact Binary Representation
 
-For bandwidth-constrained transports (mesh networks, BLE), events can be encoded in a compact binary
-format and reconstructed into fully verifiable Nostr events.
+For bandwidth-constrained transports (mesh networks, BLE), events are packed into frames that are
+rebuilt into fully verifiable Nostr events. Integers are big-endian. (MeshCore's own companion
+frames are little-endian; the payload inside a channel datagram is opaque to the radio.)
 
-Integers are big-endian. (MeshCore's own companion frames are little-endian; the payload carried
-inside a channel datagram is opaque to the radio.)
-
-### Report Binary Layout (110 bytes)
+### Report frame (117 + N bytes, 0 ≤ N ≤ 48)
 
 ```
 Offset  Size  Field
-------  ----  -----
-0       1     Flags byte
+0       1     Flags
 1       32    Public key (x-only)
-33      4     created_at (uint32, big-endian)
-37      4     Latitude (int32, big-endian, degrees x 10^7)
-41      4     Longitude (int32, big-endian, degrees x 10^7)
-45      1     Event type (registry value 0-11 or 255)
-46      64    Schnorr signature (BIP-340)
-------
-Total: 110 bytes
+33      4     created_at (uint32)
+37      4     Latitude (int32, degrees x 10^6)
+41      4     Longitude (int32, degrees x 10^6)
+45      1     Category (registry value)
+46      4     expiration (uint32)
+50      2     maxspeed (uint16, 0 = tag absent)
+52      1     N, length of the comment in bytes
+53      N     Comment, UTF-8 (may be empty)
+53+N    64    Schnorr signature (BIP-340)
 ```
 
-### Confirmation Binary Layout (134 bytes)
+Largest frame: 165 bytes, exactly the MeshCore channel-data payload limit. A comment over 48 bytes
+cannot be framed; it is never truncated.
+
+### Vote frame (134 bytes)
 
 ```
 Offset  Size  Field
-------  ----  -----
-0       1     Flags byte
-1       32    Public key (x-only)
-33      4     created_at (uint32, big-endian)
-37      32    Referenced event ID
+0       1     Flags
+1       32    Public key
+33      4     created_at (uint32)
+37      32    ID of the referenced report
 69      1     Status (0 = no_longer_there, 1 = still_there)
-70      64    Schnorr signature (BIP-340)
-------
-Total: 134 bytes
+70      64    Schnorr signature
 ```
 
-A confirmation frame does **not** carry coordinates. The receiver MUST obtain the referenced report
-(from cache or a relay) to rebuild the `lat`, `lon` and geohash tags, and MUST reject a confirmation
-whose coordinates differ from its report's. A vote heard before its report cannot be verified until
-the report arrives; v2 (see `docs/ecosystem.md`) fixes this by carrying the report's coordinates.
+The vote frame is self-contained: a two-tag event needs nothing from the report it names. A vote
+heard before its report can be verified immediately.
 
 ### Flags byte
 
 ```
-Bits 7-4  Version (0 = v1)
-Bit  3    Event class (0 = report, 1 = confirmation)
+Bits 7-4  Frame version (0)
+Bit  3    Class (0 = report, 1 = vote)
 Bit  2    Ephemeral hint (unsigned; never evidence)
 Bits 1-0  Reserved, MUST be zero
 ```
 
-The flags byte is not covered by the signature: anyone relaying a frame can change it. Bit 2 is
-therefore only a hint from the sender that a one-time key was used, never proof of anything.
+The flags byte is not covered by the signature: anyone relaying a frame can change it. Bit 2 is only
+a hint from the sender that a one-time key was used.
 
-### Coordinate Encoding
+### Coordinate encoding
 
-- Latitude: `int32(lat x 10^7)` — range [-900000000, 900000000]
-- Longitude: `int32(lon x 10^7)` — range [-1800000000, 1800000000]
-- Precision: ~1.1 cm
+- Latitude: `int32(lat × 10^6)`, range [-90 000 000, 90 000 000]
+- Longitude: `int32(lon × 10^6)`, range [-180 000 000, 180 000 000]
 
 Both directions MUST use integer arithmetic:
 
-- **Encoding** reads the value from the `lat`/`lon` tag text. It MUST NOT compute `lat * 1e7` from a
-  `Double`: that truncates and lands one unit short for about 6 % of coordinates, producing frames
-  whose signatures cannot verify.
-- **Decoding** formats the integer as `-?D+.DDDDDDD` — seven digits, a decimal point, no locale and
-  no `printf`-style formatting. `String.format("%.7f")` writes a comma on many phones, which changes
-  the signed text.
+- **Encoding** reads the value from the `lat`/`lon` tag text. It MUST NOT compute `lat * 1e6` from a
+  `Double`: that truncates and can land one unit short, producing a frame whose signature cannot
+  verify.
+- **Decoding** formats the integer as `-?D+.DDDDDD` — six digits, a decimal point, no locale and no
+  `printf`-style formatting. `String.format("%.6f")` writes a comma on many phones and changes the
+  signed text.
 
 ### Reconstruction
 
-A receiver reconstructs the full Nostr event deterministically.
+Report:
 
-#### Report Reconstruction
+1. take `pubkey`, `created_at`, position, category, `expiration`, `maxspeed` and the comment
+2. format `lat`/`lon` from the integers and derive the geohashes at 4, 5, 6
+3. build tags in the canonical order (`maxspeed` only when the uint16 is non-zero)
+4. serialize per [NIP-01](01.md): `[0, <pubkey_hex>, <created_at>, 1315, <tags>, <content>]`, compute
+   the ID and **verify the BIP-340 signature**. Without a valid signature the frame is not an event.
 
-1. Take `pubkey`, `created_at`, position and type from the frame
-2. Format `lat`/`lon` from the integers (above) and derive the geohashes at precision 4, 5, 6
-3. Look up the type string from the registry value; an unknown value MUST be dropped
-4. Set `expiration` to `created_at + 1209600`
-5. Set `alt` to `"Roadstr: <type_string> report"`
-6. Assemble tags in canonical order and set `content` to `""`
-7. Serialize per [NIP-01](01.md): `[0, <pubkey_hex>, <created_at>, <kind>, <tags>, ""]`
-8. Compute `id` as SHA-256 of the serialized array
-9. Verify the BIP-340 signature of the ID under the public key. **Without a valid signature the
-   frame is not an event.**
+Vote: build `[["e", id], ["status", …]]`, `content = ""`, kind 1316, compute the ID, verify.
 
-#### Confirmation Reconstruction
-
-1. Obtain the referenced report and extract its `lat`, `lon` and geohashes
-2. Format the coordinates and tags as in a report, with `status` from the frame
-3. Set `alt` to `"Roadstr: event confirmed"` / `"Roadstr: event denied"`
-4. Set `content` to `""`
-5. Serialize, compute the ID and verify the signature as above
-
-### Encoding Rules
+### Encoding rules
 
 An encoder MUST refuse anything that does not round-trip exactly:
 
@@ -320,54 +291,75 @@ event -- encode --> frame -- decode --> event'      event'.id == event.id
 ```
 
 "Semantically equivalent" is not enough: one different tag, one decimal more or a comma changes the
-ID. Refusal reasons (stable names; used by the conformance vectors):
+ID. Refusal reasons (stable names):
 
 | Code | Meaning |
 |---|---|
 | `WRONG_KIND`, `MALFORMED_EVENT` | not a well-formed 1315/1316 event |
-| `NON_EMPTY_CONTENT` | the report has a comment |
-| `NON_CANONICAL` | tag order, spelling, `alt`, `expiration`, geohash or coordinate text differs |
+| `NON_CANONICAL` | tag order, spelling, extra tag, `expiration` or coordinate text differs |
 | `UNKNOWN_TYPE` | `t` not in the registry |
 | `COORDINATE_RANGE` | outside ±90° / ±180° |
-| `TIMESTAMP_RANGE` | `created_at` does not fit in uint32 |
-| `REFERENCE_MISMATCH` | a confirmation repeats coordinates other than its report's |
+| `TIMESTAMP_RANGE` | `created_at` or `expiration` does not fit in uint32 |
+| `COMMENT_TOO_LONG` | comment over 48 UTF-8 bytes |
+| `BAD_SPEED_LIMIT` | `maxspeed` outside 5–300 or not canonical text |
+| `BAD_LENGTH` | frame length inconsistent with its class or comment length |
+| `BAD_VERSION`, `RESERVED_BITS`, `BAD_STATUS` | flags or status byte invalid |
 | `SIGNATURE_INVALID` | the ID or signature does not verify |
 
-### Conformance Vectors
+Decoders check length, version, reserved bits, class, type, coordinate range, speed limit and UTF-8
+validity before doing any signature work.
 
-[`roadstr-nostr-meshcore-v1.json`](https://github.com/roadstrapp/roadstr-app/blob/main/docs/interoperability/vectors/roadstr-nostr-meshcore-v1.json)
-contains 21 valid, 33 invalid, 12 non-representable, 1 tolerated and 5 truncation-recovery cases,
-generated by an independent stdlib-only Python program and cross-checked with `@noble/curves`.
-Implementations SHOULD run them in CI. Roadbeacon pins at least one of them as a unit test.
+### Conformance vectors
+
+A vector file is to be generated for this frame layout (the previous one described the deprecated
+layout and is obsolete). Until it exists, the two reference implementations are the contract:
+Roadbeacon's `BinaryCodecTest` pins a frame and event ID computed independently, and the Roadstr
+client is expected to add the layout to its interop document.
 
 ## Mesh Transport
 
-The frame is sent as-is in one MeshCore **channel data datagram** (`0x3E` on the companion protocol),
-with:
+The frame is sent unchanged in one MeshCore **channel data datagram** (`0x3E` on the companion
+protocol), with:
 
-- channel: the `#roadstr` hashtag channel (key = first 16 bytes of `SHA-256("#roadstr")` =
+- channel: `#roadstr` (key = first 16 bytes of `SHA-256("#roadstr")` =
   `b7f4317db7b03aeb563b2c4bdc476d6a`) — a public channel by construction, not a privacy feature;
-- `data_type`: `0xFF52` (inside the firmware's unregistered testing range `0xFF00–0xFFFE`) until a
-  stable value is registered in `0100–FEFF` with MeshCore;
-- payload: the 110 or 134 bytes, nothing added; 165 bytes is the largest payload current companion
-  firmware accepts (166–167 pass the host check and then fail permanently, so never use them).
+- `data_type`: `0xFF52` (inside the firmware's unregistered testing range) until a stable value is
+  registered with MeshCore in `0100–FEFF`;
+- payload: 117–165 bytes for a report, 134 for a vote; never 166–167, which pass one check and then
+  fail permanently in the radio.
 
-Receivers MUST check length, version, reserved bits, type, coordinate range and status before doing
-any signature work, and treat the datagram's channel and `data_type` as untrusted input. The
-payload is 110 bytes, so at SF9/125 kHz a report is on air for roughly 0.6 s and at SF10 about
-1.1 s; rate limits are part of the protocol, not an optimisation. See `docs/ecosystem.md` for bridge
-limits and the hardware validation checklist.
+Rate limits, de-duplication and bridge consent are part of any implementation's obligations: a
+report is 117–165 bytes, roughly 0.6–0.9 s of airtime at SF9/125 kHz, so a misbehaving bridge is a
+channel-wide problem.
 
 ## Kind Allocation
 
-Kinds 1315 and 1316 are in the regular event range (1000-9999) defined by [NIP-01](01.md). They are
-currently unassigned in the NIPs kind registry. Registration requires a PR to
-[the NIPs repository](https://github.com/nostr-protocol/nips) adding entries to the event kinds
-table, referencing this specification.
+Kinds 1315 and 1316 are in the regular range (1000–9999). They are unassigned in the NIPs kind
+registry; registration requires a PR to [the NIPs repository](https://github.com/nostr-protocol/nips).
+
+## Appendix A — the deprecated layout
+
+Before this revision, Roadbeacon and the first interoperability work used a different layout:
+
+```
+report (kind 1315): t, g4, g5, g6, lat, lon, expiration, alt        seven decimals
+vote   (kind 1316): e, g4, g5, g6, status, lat, lon, expiration, alt
+expiration:         created_at + 1209600 (always)
+alt:                "Roadstr: <type> report" / "Roadstr: event confirmed" / "Roadstr: event denied"
+```
+
+It is **deprecated**: clients MUST NOT write it, and the frame defined above cannot carry it (the
+rebuilt tags would differ, so the signature would not verify). Existing events in that layout remain
+valid Nostr events and may be displayed; they expire within 14 days of their creation. A client can
+recognise them by the `alt` tag or by `t` appearing before `lat`.
+
+The old frame (110 bytes for a report, 134 for a vote with coordinates in its tags) is likewise
+obsolete and MUST NOT be decoded as the frames above; the vote frame has the same length but a
+different meaning, so implementations must not mix versions.
 
 ## References
 
-- [NIP-01](01.md) - Basic protocol flow description
-- [NIP-31](31.md) - Dealing with unknown event kinds (`alt` tag)
-- [NIP-40](40.md) - Expiration timestamp
-- [`docs/ecosystem.md`](../docs/ecosystem.md) - the two implementations, compatibility, v2 proposal
+- [NIP-01](01.md) — basic protocol flow
+- [NIP-40](40.md) — expiration timestamp
+- [Roadstr interoperability document](https://github.com/roadstrapp/roadstr-app/blob/main/docs/interoperability/MESHCORE_NOSTR.md) — independent audit of the deprecated layout, the bridge design and the hardware checklist
+- [`docs/ecosystem.md`](../docs/ecosystem.md) — the two implementations and the migration plan

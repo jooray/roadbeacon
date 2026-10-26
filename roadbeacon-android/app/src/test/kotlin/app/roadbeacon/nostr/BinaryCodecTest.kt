@@ -7,128 +7,129 @@ import org.junit.Test
 import java.util.Locale
 
 /**
- * The frames are a wire format shared with an independent client (`roadstrapp/roadstr-app`), so
- * these tests pin the canonical bytes rather than our own conventions. The worked example is one
- * of its published, independently generated interop vectors.
+ * Frames are a wire format shared with the independent Roadstr client, so these tests pin the
+ * canonical bytes rather than our own conventions. The worked example below was produced by a
+ * separate Python implementation and its event ID was recomputed from the NIP-01 serialisation.
  */
 class BinaryCodecTest {
 
-    // A throw-away test key from the published interop vector set.
-    private val vectorPubkey = "96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453"
-    private val vectorReportId = "c4fc8b221dea97c31b73423abafde550d64d06e3b4df771c1d41ee328b3e251a"
+    private val pubkey = "96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453"
+    private val reportId = "dac79ddf0e4aeb64f56f454497afd54e7926e19a5d3c062f75c25e226f4fcbca"
     private val vectorFrame = (
-        "0096cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453" +
-            "6553f1001d1eed7c0166ebab00" +
-            "a10bc13575ef963531acc54afc13445f198fe8b507d07d0fd4f2710e358bae17" +
-            "c1962feca23cc7022d31e5b813430e6ad74e3e8cc7df126d7bce45798bd0ee05"
+        "00" +
+            "96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453" +
+            "6553f100" +
+            "02e97e26" +
+            "0023e45e" +
+            "00" +
+            "65666600" +
+            "0000" +
+            "00" +
+            "aa".repeat(64)
         ).hexToBytes()
 
     @Test
-    fun `published vector decodes to the exact event id and tags`() {
+    fun `published-style vector decodes to the exact event id and tags`() {
         val decoded = BinaryCodec.decodeReport(vectorFrame)
 
         assertNotNull(decoded)
         assertEquals(1315, decoded!!.kind)
-        assertEquals(vectorPubkey, decoded.pubkey)
+        assertEquals(pubkey, decoded.pubkey)
         assertEquals(1700000000L, decoded.createdAt)
-        assertEquals(vectorReportId, decoded.id)
+        assertEquals(reportId, decoded.id)
+        assertEquals("", decoded.content)
         assertEquals(
             listOf(
-                listOf("t", "police"),
+                listOf("lat", "48.856614"),
+                listOf("lon", "2.352222"),
                 listOf("g", "u09t"),
                 listOf("g", "u09tv"),
                 listOf("g", "u09tvw"),
-                listOf("lat", "48.8566140"),
-                listOf("lon", "2.3522219"),
-                listOf("expiration", "1701209600"),
-                listOf("alt", "Roadstr: police report")
+                listOf("t", "police"),
+                listOf("expiration", "1701209600")
             ),
             decoded.tags
         )
     }
 
     @Test
-    fun `published vector re-encodes byte for byte`() {
+    fun `vector re-encodes byte for byte`() {
         val decoded = BinaryCodec.decodeReport(vectorFrame)!!
         assertArrayEquals(vectorFrame, BinaryCodec.encodeReport(decoded))
     }
 
     @Test
-    fun `encode report produces correct size`() {
-        assertArrayEquals(vectorFrame, BinaryCodec.encodeReport(reportEvent())!!)
-        assertEquals(BinaryCodec.REPORT_SIZE, BinaryCodec.encodeReport(reportEvent())!!.size)
+    fun `report without comment is 117 bytes`() {
+        val encoded = BinaryCodec.encodeReport(report())!!
+        assertEquals(BinaryCodec.REPORT_BASE_SIZE, encoded.size)
+        assertEquals(117, encoded.size)
+        assertArrayEquals(vectorFrame, encoded)
     }
 
     @Test
-    fun `encode confirmation produces correct size`() {
-        val encoded = BinaryCodec.encodeConfirmation(confirmationEvent(), reportEvent())!!
-        assertEquals(BinaryCodec.CONFIRMATION_SIZE, encoded.size)
-    }
-
-    @Test
-    fun `round trip report preserves tags, key, time and signature`() {
-        val event = reportEvent()
+    fun `round trip report preserves tags, content, key, time and signature`() {
+        val event = report(content = "police checking seatbelts")
         val decoded = BinaryCodec.decodeReport(BinaryCodec.encodeReport(event)!!)!!
 
         assertEquals(event.pubkey, decoded.pubkey)
         assertEquals(event.createdAt, decoded.createdAt)
         assertEquals(event.sig, decoded.sig)
         assertEquals(event.tags, decoded.tags)
+        assertEquals(event.content, decoded.content)
         assertEquals(event.id, decoded.id)
     }
 
     @Test
-    fun `round trip confirmation preserves tags`() {
-        val report = reportEvent()
-        val event = confirmationEvent()
-        val encoded = BinaryCodec.encodeConfirmation(event, report)!!
-        val decoded = BinaryCodec.decodeConfirmation(encoded, report)!!
+    fun `vote is 134 bytes and needs no report to decode`() {
+        val report = report()
+        val vote = vote(report.id)
+        val encoded = BinaryCodec.encodeConfirmation(vote)!!
 
-        assertEquals(event.tags, decoded.tags)
-        assertEquals(event.pubkey, decoded.pubkey)
-        assertEquals(event.sig, decoded.sig)
+        assertEquals(134, encoded.size)
+        val decoded = BinaryCodec.decodeConfirmation(encoded)!!
+        assertEquals(report.id, decoded.tags[0][1])
+        assertEquals("still_there", decoded.tags[1][1])
+        assertEquals(vote.id, decoded.id)
+        // The frame is valid even though the report was never seen.
+        assertNotNull(BinaryCodec.decode(encoded))
     }
 
     @Test
-    fun `truncating the seventh decimal is refused, not silently rounded`() {
-        // 35.1976312 * 1e7 is 351976311.99999994 in IEEE-754: a truncating encoder lands one unit
-        // short and produces a frame nobody can verify. Every event this encoder emits round-trips.
-        val event = reportEvent(lat = "35.1976312", lon = "139.6917000")
-        val encoded = BinaryCodec.encodeReport(event)
-        assertNotNull(encoded)
-        assertEquals(event.tags, BinaryCodec.decodeReport(encoded!!)!!.tags)
+    fun `comment of 48 bytes fits, 49 does not`() {
+        val fits = report(content = "a".repeat(RoadEventFormat.MAX_COMMENT_BYTES))
+        val encoded = BinaryCodec.encodeReport(fits)!!
+        assertEquals(165, encoded.size)
+        assertEquals(fits.content, BinaryCodec.decodeReport(encoded)!!.content)
+
+        assertNull(BinaryCodec.encodeReport(report(content = "a".repeat(49))))
     }
 
     @Test
-    fun `coordinate formatting ignores the device locale`() {
-        val previous = Locale.getDefault()
-        try {
-            Locale.setDefault(Locale.GERMANY)
-            assertEquals("48.8566140", CanonicalCoordinates.format(488566140))
-            assertEquals("-2.3522219", CanonicalCoordinates.format(-23522219))
-            assertTrue(CanonicalCoordinates.parseLatitude("48,8566140") is CanonicalCoordinates.Parsed.Malformed)
-        } finally {
-            Locale.setDefault(previous)
+    fun `comment limit is counted in UTF-8 bytes, not characters`() {
+        val twoByte = "ě".repeat(24) // 48 bytes
+        assertEquals(48, twoByte.toByteArray(Charsets.UTF_8).size)
+        assertNotNull(BinaryCodec.encodeReport(report(content = twoByte)))
+
+        val tooLong = "ě".repeat(25) // 50 bytes
+        assertNull(BinaryCodec.encodeReport(report(content = tooLong)))
+    }
+
+    @Test
+    fun `maxspeed round trips and must be 5 to 300`() {
+        for (limit in listOf(5, 50, 300)) {
+            val event = report(speedLimitKmh = limit)
+            val decoded = BinaryCodec.decodeReport(BinaryCodec.encodeReport(event)!!)!!
+            assertEquals(limit.toString(), decoded.tags.last()[1])
         }
+        assertNull(BinaryCodec.encodeReport(report(extraTag = listOf("maxspeed", "4"))))
+        assertNull(BinaryCodec.encodeReport(report(extraTag = listOf("maxspeed", "301"))))
+        assertNull(BinaryCodec.encodeReport(report(extraTag = listOf("maxspeed", "050"))))
     }
 
     @Test
-    fun `coordinate encoding boundary values`() {
-        for ((lat, lon) in listOf(90.0 to 180.0, -90.0 to -180.0, 0.0 to 0.0, -48.8566140 to -2.3522219)) {
-            val event = reportEvent(
-                lat = CanonicalCoordinates.format(CanonicalCoordinates.latitudeE7(lat)!!),
-                lon = CanonicalCoordinates.format(CanonicalCoordinates.longitudeE7(lon)!!)
-            )
-            val decoded = BinaryCodec.decodeReport(BinaryCodec.encodeReport(event)!!)
-            assertNotNull("decode failed for $lat,$lon", decoded)
-            assertEquals(event.tags, decoded!!.tags)
-        }
-    }
-
-    @Test
-    fun `all event types encode and decode`() {
+    fun `every registry type encodes and decodes`() {
         for (type in EventType.entries) {
-            val event = reportEvent(type = type)
+            val event = report(type = type)
             val decoded = BinaryCodec.decodeReport(BinaryCodec.encodeReport(event)!!)
             assertNotNull("decode failed for ${type.typeName}", decoded)
             assertEquals(type.typeName, decoded!!.tags.first { it[0] == "t" }[1])
@@ -136,152 +137,176 @@ class BinaryCodecTest {
     }
 
     @Test
-    fun `flags byte distinguishes report from confirmation and carries the ephemeral hint`() {
-        val report = BinaryCodec.encodeReport(reportEvent(), ephemeral = false)!!
-        val ephemeral = BinaryCodec.encodeReport(reportEvent(), ephemeral = true)!!
-        val confirmation = BinaryCodec.encodeConfirmation(confirmationEvent(), reportEvent())!!
-
-        assertTrue(BinaryCodec.isReport(report))
-        assertFalse(BinaryCodec.isConfirmation(report))
-        assertTrue(BinaryCodec.isConfirmation(confirmation))
-        assertFalse(BinaryCodec.isReport(confirmation))
-
-        assertEquals(0, report[0].toInt() and 0x04)
-        assertNotEquals(0, ephemeral[0].toInt() and 0x04)
-        // The flags byte is not covered by the signature, so everything else is identical.
-        assertArrayEquals(report.copyOfRange(1, report.size), ephemeral.copyOfRange(1, ephemeral.size))
-    }
-
-    @Test
-    fun `frames with a reserved version or reserved bits are refused`() {
-        val versionOne = vectorFrame.copyOf().also { it[0] = 0x10.toByte() }
-        val reserved = vectorFrame.copyOf().also { it[0] = 0x01.toByte() }
-        assertNull(BinaryCodec.decodeReport(versionOne))
-        assertNull(BinaryCodec.decodeReport(reserved))
-    }
-
-    @Test
-    fun `unknown type and out-of-range coordinates are refused`() {
-        val unknownType = vectorFrame.copyOf().also { it[45] = 0x0C.toByte() }
-        val badCoordinate = vectorFrame.copyOf().also {
-            it[37] = 0x3F; it[38] = 0xFF.toByte(); it[39] = 0xFF.toByte(); it[40] = 0xFF.toByte()
+    fun `boundary and negative coordinates round trip`() {
+        for ((latE6, lonE6) in listOf(
+            90_000_000 to 180_000_000,
+            -90_000_000 to -180_000_000,
+            0 to 0,
+            -48_856_614 to -2_352_222
+        )) {
+            val event = report(latE6 = latE6, lonE6 = lonE6)
+            val decoded = BinaryCodec.decodeReport(BinaryCodec.encodeReport(event)!!)
+            assertNotNull("decode failed for $latE6,$lonE6", decoded)
+            assertEquals(event.tags, decoded!!.tags)
         }
-        assertNull(BinaryCodec.decodeReport(unknownType))
-        assertNull(BinaryCodec.decodeReport(badCoordinate))
     }
 
     @Test
-    fun `non-representable events are refused with null`() {
-        // Non-empty comment.
-        assertNull(BinaryCodec.encodeReport(reportEvent(content = "police checking seatbelts")))
-        // Brand changed: a different alt changes the id and cannot be rebuilt from a frame.
-        assertNull(BinaryCodec.encodeReport(reportEvent(alt = "Roadbeacon: police report")))
-        // Extra tag.
-        assertNull(BinaryCodec.encodeReport(reportEvent(extraTag = listOf("client", "roadbeacon"))))
-        // Wrong tag order.
-        assertNull(BinaryCodec.encodeReport(reportEvent(moveAltFirst = true)))
-        // Expiration not derived from created_at.
-        assertNull(BinaryCodec.encodeReport(reportEvent(expiration = "1700007200")))
+    fun `coordinate formatting ignores the device locale`() {
+        val previous = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+            assertEquals("48.856614", CanonicalCoordinates.format(48_856_614))
+            assertEquals("-2.352222", CanonicalCoordinates.format(-2_352_222))
+            assertTrue(CanonicalCoordinates.parseLatitude("48,856614") is CanonicalCoordinates.Parsed.Malformed)
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun `non-canonical reports are refused`() {
+        // The previous layout's alt tag.
+        assertNull(BinaryCodec.encodeReport(report(extraTag = listOf("alt", "Road event: police"))))
+        // Seven decimals from the old client.
+        assertNull(BinaryCodec.encodeReport(report(lat = "48.8566140", lon = "2.3522220")))
         // Decimal comma from a comma-locale phone.
-        assertNull(BinaryCodec.encodeReport(reportEvent(lat = "48,8566140")))
+        assertNull(BinaryCodec.encodeReport(report(lat = "48,856614")))
+        // Tag order is part of the identity.
+        assertNull(BinaryCodec.encodeReport(report(moveTypeFirst = true)))
+        // Extra tag.
+        assertNull(BinaryCodec.encodeReport(report(extraTag = listOf("client", "roadbeacon"))))
+        // Expiration not canonical text.
+        assertNull(BinaryCodec.encodeReport(report(expiration = "01701209600")))
         // Unknown category.
-        assertNull(BinaryCodec.encodeReport(reportEvent(typeName = "surveillance_camera")))
+        assertNull(BinaryCodec.encodeReport(report(typeName = "roadworks")))
     }
 
     @Test
-    fun `confirmation needs the report it names`() {
-        val confirmation = confirmationEvent()
-        // No report: the coordinates that the tags must repeat are unknown.
-        assertNull(BinaryCodec.encodeConfirmation(confirmation, reportEvent(lat = "48.0000000")))
-        // Coordinates of a different report than the tags repeat.
-        assertNull(BinaryCodec.encodeConfirmation(confirmation, reportEvent(lat = "48.8566141")))
+    fun `vote tags are exactly e and status`() {
+        val report = report()
+        assertNull(BinaryCodec.encodeConfirmation(vote(report.id).copy(content = "hm")))
+        assertNull(
+            BinaryCodec.encodeConfirmation(
+                vote(report.id).copy(tags = vote(report.id).tags + listOf(listOf("lat", "48.856614")))
+            )
+        )
+        assertNull(
+            BinaryCodec.encodeConfirmation(
+                vote(report.id).copy(tags = listOf(listOf("e", report.id), listOf("status", "maybe")))
+            )
+        )
     }
 
     @Test
-    fun `wrong sizes and a class bit that disagrees with the length are refused`() {
-        assertNull(BinaryCodec.decodeReport(ByteArray(50)))
-        assertNull(BinaryCodec.decodeConfirmation(ByteArray(50), 488566140, 23522219))
-        assertNull(BinaryCodec.decodeReport(ByteArray(BinaryCodec.CONFIRMATION_SIZE)))
-        assertNull(BinaryCodec.decodeConfirmation(ByteArray(BinaryCodec.REPORT_SIZE), 488566140, 23522219))
+    fun `frames with a reserved version, reserved bits or the wrong class are refused`() {
+        fun tamper(offset: Int, value: Int) = vectorFrame.copyOf().also { it[offset] = value.toByte() }
+
+        assertNull(BinaryCodec.decodeReport(tamper(0, 0x10))) // version 1
+        assertNull(BinaryCodec.decodeReport(tamper(0, 0x01))) // reserved bit
+        assertNull(BinaryCodec.decodeReport(tamper(0, 0x08))) // confirmation class, report length
+        assertNull(BinaryCodec.decodeReport(tamper(45, 14))) // unknown type
+        assertNull(BinaryCodec.decodeReport(tamper(37, 0x3F))) // latitude out of range
+        assertNull(BinaryCodec.decodeReport(vectorFrame.copyOfRange(0, 100))) // truncated
     }
 
     @Test
-    fun `generic decode handles reports only`() {
-        val report = BinaryCodec.encodeReport(reportEvent())!!
-        val confirmation = BinaryCodec.encodeConfirmation(confirmationEvent(), reportEvent())!!
+    fun `invalid UTF-8 in a comment is refused`() {
+        val withByte = vectorFrame.copyOfRange(0, 53).toMutableList()
+        withByte.add(0xFF.toByte())
+        withByte.addAll(vectorFrame.copyOfRange(53, vectorFrame.size).toList())
+        val frame = withByte.toByteArray().also { it[52] = 1 }
+        assertNull(BinaryCodec.decodeReport(frame))
+    }
 
-        assertEquals(1315, BinaryCodec.decode(report)!!.kind)
-        assertNull(BinaryCodec.decode(confirmation)) // confirmations need their report's coordinates
+    @Test
+    fun `flags carry the ephemeral hint without touching the signed body`() {
+        val normal = BinaryCodec.encodeReport(report(), ephemeral = false)!!
+        val ephemeral = BinaryCodec.encodeReport(report(), ephemeral = true)!!
+
+        assertEquals(0, normal[0].toInt() and 0x04)
+        assertNotEquals(0, ephemeral[0].toInt() and 0x04)
+        assertArrayEquals(normal.copyOfRange(1, normal.size), ephemeral.copyOfRange(1, ephemeral.size))
+    }
+
+    @Test
+    fun `decode dispatches on the class bit`() {
+        assertEquals(1315, BinaryCodec.decode(BinaryCodec.encodeReport(report())!!)!!.kind)
+        assertEquals(1316, BinaryCodec.decode(BinaryCodec.encodeConfirmation(vote(report().id))!!)!!.kind)
+        assertNull(BinaryCodec.decode(ByteArray(0)))
     }
 
     @Test
     fun `getConfirmationEventId extracts the referenced id`() {
-        val encoded = BinaryCodec.encodeConfirmation(confirmationEvent(), reportEvent())!!
-        assertEquals(confirmationEvent().tags.first { it[0] == "e" }[1], BinaryCodec.getConfirmationEventId(encoded))
+        val vote = vote(report().id)
+        val encoded = BinaryCodec.encodeConfirmation(vote)!!
+        assertEquals(vote.tags[0][1], BinaryCodec.getConfirmationEventId(encoded))
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────────────────────────
 
-    private fun reportEvent(
+    private fun report(
         type: EventType = EventType.POLICE,
         typeName: String? = null,
-        lat: String = "48.8566140",
-        lon: String = "2.3522219",
-        content: String = "",
-        alt: String = ProtocolText.reportAlt(type.typeName),
+        latE6: Int = 48_856_614,
+        lonE6: Int = 2_352_222,
+        lat: String = CanonicalCoordinates.format(latE6),
+        lon: String = CanonicalCoordinates.format(lonE6),
+        createdAt: Long = 1700000000L,
         expiration: String = "1701209600",
+        content: String = "",
+        speedLimitKmh: Int? = null,
         extraTag: List<String>? = null,
-        moveAltFirst: Boolean = false
+        moveTypeFirst: Boolean = false
     ): NostrEvent {
-        // Geohashes follow the coordinates, exactly as a real event must; when the coordinate text
-        // is not canonical the placeholders are irrelevant because encoding is refused anyway.
-        val latE7 = (CanonicalCoordinates.parseLatitude(lat) as? CanonicalCoordinates.Parsed.Value)
-        val lonE7 = (CanonicalCoordinates.parseLongitude(lon) as? CanonicalCoordinates.Parsed.Value)
-        val geohashes = if (latE7 != null && lonE7 != null) {
-            val latDeg = CanonicalCoordinates.degrees(latE7.e7)
-            val lonDeg = CanonicalCoordinates.degrees(lonE7.e7)
-            listOf(4, 5, 6).map { app.roadbeacon.location.GeohashUtil.encode(latDeg, lonDeg, it) }
-        } else {
-            listOf("u09t", "u09tv", "u09tvw")
+        val tags = BinaryCodec.reportTags(
+            latE6,
+            lonE6,
+            type,
+            0L,
+            speedLimitKmh
+        ).toMutableList()
+        // Replace the generated coordinate and expiration text when a test needs a
+        // non-canonical spelling.
+        tags[0] = listOf("lat", lat)
+        tags[1] = listOf("lon", lon)
+        val expirationIndex = tags.indexOfFirst { it[0] == "expiration" }
+        tags[expirationIndex] = listOf("expiration", expiration)
+        if (typeName != null) {
+            val index = tags.indexOfFirst { it[0] == "t" }
+            tags[index] = listOf("t", typeName)
         }
-        val tags = mutableListOf(
-            listOf("t", typeName ?: type.typeName),
-            listOf("g", geohashes[0]),
-            listOf("g", geohashes[1]),
-            listOf("g", geohashes[2]),
-            listOf("lat", lat),
-            listOf("lon", lon),
-            listOf("expiration", expiration),
-            listOf("alt", alt)
-        )
         if (extraTag != null) tags.add(extraTag)
-        if (moveAltFirst) tags.add(0, tags.removeAt(tags.lastIndex))
+        if (moveTypeFirst) {
+            val index = tags.indexOfFirst { it[0] == "t" }
+            tags.add(0, tags.removeAt(index))
+        }
         return NostrEvent(
-            pubkey = vectorPubkey,
-            createdAt = 1700000000L,
+            pubkey = pubkey,
+            createdAt = createdAt,
             kind = 1315,
             tags = tags,
             content = content,
-            sig = "a10bc13575ef963531acc54afc13445f198fe8b507d07d0fd4f2710e358bae17" +
-                "c1962feca23cc7022d31e5b813430e6ad74e3e8cc7df126d7bce45798bd0ee05"
+            sig = "aa".repeat(64)
         ).let { it.copy(id = it.computeId()) }
     }
 
-    private fun confirmationEvent(): NostrEvent {
+    private fun vote(
+        reportId: String,
+        stillThere: Boolean = true,
+        createdAt: Long = 1700003600L
+    ): NostrEvent {
         val tags = BinaryCodec.confirmationTags(
-            eventId = vectorReportId,
-            latitudeE7 = 488566140,
-            longitudeE7 = 23522219,
-            status = ConfirmationStatus.STILL_THERE,
-            createdAt = 1700003600L
+            reportId,
+            if (stillThere) ConfirmationStatus.STILL_THERE else ConfirmationStatus.NO_LONGER_THERE
         )
         return NostrEvent(
-            pubkey = vectorPubkey,
-            createdAt = 1700003600L,
+            pubkey = pubkey,
+            createdAt = createdAt,
             kind = 1316,
             tags = tags,
             content = "",
-            sig = "b".repeat(128)
+            sig = "bb".repeat(64)
         ).let { it.copy(id = it.computeId()) }
     }
 }

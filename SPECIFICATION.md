@@ -2,21 +2,21 @@
 
 > **Status.** This is the long design document, kept for its architecture and UI sections. The
 > normative description of the event format is [`nips/road-events.md`](nips/road-events.md);
-> where the two disagree, the NIP wins. Several errors that used to be here are corrected below
-> and marked with a note. The app was called Roadstr until 0.4.0; the *format* is still v1 and
-> its `alt` text still says `"Roadstr: …"` — see [`docs/ecosystem.md`](docs/ecosystem.md).
+> where the two disagree, the NIP wins. The app was called Roadstr until 0.4.0, and 0.4.0 also
+> adopted the event layout of the independent Roadstr client (six decimals, no `alt`, two-tag
+> votes); the old layout is deprecated — see [`docs/ecosystem.md`](docs/ecosystem.md).
 
 ## 1. Overview
 
 Roadbeacon is a decentralized road event reporting system built on the Nostr protocol. It operates as an OsmAnd plugin (Android) that allows drivers to report, confirm, and view road events (police checks, construction, closures, traffic jams, etc.) directly from the navigation interface. Events are published as signed Nostr events and displayed as color-coded map markers.
 
-A compact binary encoding allows events to be transferred over MeshCore mesh networks in one datagram (110 bytes for a report, 134 for a confirmation), allowing off-grid propagation of road reports.
+A compact binary encoding allows events to be transferred over MeshCore mesh networks in one datagram (117–165 bytes for a report including its comment, 134 for a self-contained vote), allowing off-grid propagation of road reports.
 
 ### Design Principles
 
 - **Decentralized**: No central server. Events are published to Nostr relays.
 - **Verifiable**: All events are cryptographically signed. Any recipient can verify authenticity.
-- **Compact**: Binary representation allows mesh network transfer in one 110-byte datagram.
+- **Compact**: Binary representation allows mesh network transfer in one 117–165-byte datagram.
 - **Trust-all model (v1)**: No reputation system. All users are trusted equally.
 - **Privacy-configurable**: Users choose between persistent identity or ephemeral keys.
 
@@ -68,391 +68,147 @@ A compact binary encoding allows events to be transferred over MeshCore mesh net
 
 ---
 
-## 3. Nostr Event Format
+## 3. Event Format (summary)
 
-### 3.1 Event Kinds
+The normative specification is [`nips/road-events.md`](nips/road-events.md). This is a short
+summary so the rest of this document can be read without switching files.
 
-| Kind | Name | Category | Description |
-|------|------|----------|-------------|
-| 1315 | Road Event Report | Regular (stored) | A new road event report |
-| 1316 | Road Event Confirmation | Regular (stored) | Confirmation or denial of existing event |
+### 3.1 Kinds
 
-Both kinds are in the regular range (1000–9999), meaning relays store them persistently.
+| Kind | Name | NIP-01 class |
+|---|---|---|
+| 1315 | Road event report | regular |
+| 1316 | Confirmation / denial | regular |
 
-### 3.2 Road Event Report (Kind 1315)
+### 3.2 Report (kind 1315)
 
-```json
-{
-  "id": "<sha256 hex>",
-  "pubkey": "<32-byte hex pubkey>",
-  "created_at": 1700000000,
-  "kind": 1315,
-  "tags": [
-    ["t", "police"],
-    ["g", "u09t"],
-    ["g", "u09tv"],
-    ["g", "u09tvw"],
-    ["lat", "48.8566140"],
-    ["lon", "2.3522219"],
-    ["expiration", "1701209600"],
-    ["alt", "Roadstr: police report"]
-  ],
-  "content": "",
-  "sig": "<64-byte hex signature>"
-}
-```
+Tags in exactly this order:
 
-**Tag Definitions (canonical order)**:
+| # | Tag | Value |
+|---|---|---|
+| 1 | `lat` | latitude, exactly 6 decimals (`48.856614`) |
+| 2 | `lon` | longitude, exactly 6 decimals (`2.352222`) |
+| 3-5 | `g` | geohash of the position at precision 4, 5, 6 |
+| 6 | `t` | category string from the registry (§3.4) |
+| 7 | `expiration` | NIP-40 retention, `created_at + max(14 days, lifetime)` |
+| 8 | `maxspeed` | optional, km/h, 5–300, no leading zeros |
 
-| # | Tag | Description |
-|---|-----|-------------|
-| 1 | `t` | Event type string (from enum or custom text) |
-| 2 | `g` (4 chars) | Geohash prefix level 4 (~20km cell) |
-| 3 | `g` (5 chars) | Geohash prefix level 5 (~5km cell) |
-| 4 | `g` (6 chars) | Geohash prefix level 6 (~1.2km cell) |
-| 5 | `expiration` | Unix timestamp when event expires (NIP-40) |
-| 6 | `alt` | Human-readable fallback (NIP-31) |
+`.content` is an optional comment. There is **no `alt` tag**: the format carries no brand.
 
-**Content field**:
-- Empty string `""` for standard enum types
-- For custom types: JSON with additional details: `{"description": "Fallen tree blocking right lane"}`
+### 3.3 Vote (kind 1316)
 
-**Coordinate Encoding in Geohash**:
-The precise coordinates are encoded in the geohash tags. A 6-character geohash provides ~1.2km × 0.6km precision. For exact marker placement, a 9-character geohash is included in the content for custom events, or the full coordinates are stored as additional tags:
+Exactly two tags: `e` (the report's event ID) and `status` (`still_there` or `no_longer_there`),
+with empty `.content`. A vote carries no position and no expiration, which is what makes its
+134-byte frame self-contained.
 
-```json
-["lat", "48.8566140"],
-["lon", "2.3522219"]
-```
+### 3.4 Categories
 
-**Updated canonical tag order with precise coordinates:**
+| Value | `t` | Display lifetime |
+|---|---|---|
+| 0 | `police` | 4 h |
+| 1 | `speed_camera` | 30 d |
+| 2 | `traffic_jam` | 1 h |
+| 3 | `accident` | 4 h |
+| 4 | `road_closure` | 24 h |
+| 5 | `construction` | 15 d |
+| 6 | `hazard` | 4 h |
+| 7 | `road_condition` | 15 d |
+| 8 | `pothole` | 7 d |
+| 9 | `fog` | 4 h |
+| 10 | `ice` | 4 h |
+| 11 | `animal` | 1 h |
+| 12 | `police_station` | 30 d |
+| 13 | `surveillance_camera` | 30 d |
+| 14–254 | reserved | — |
+| 255 | `other` | 4 h |
 
-| # | Tag | Description |
-|---|-----|-------------|
-| 1 | `t` | Event type string |
-| 2 | `g` (4 chars) | Geohash level 4 |
-| 3 | `g` (5 chars) | Geohash level 5 |
-| 4 | `g` (6 chars) | Geohash level 6 |
-| 5 | `lat` | Latitude as decimal string (7 decimal places) |
-| 6 | `lon` | Longitude as decimal string (7 decimal places) |
-| 7 | `expiration` | NIP-40 expiry timestamp |
-| 8 | `alt` | NIP-31 fallback text |
+The numeric value is the byte carried in the frame. Reserved values MUST NOT be mapped to `other`.
 
-### 3.3 Road Event Confirmation (Kind 1316)
+## 4. Compact Binary Format
 
-```json
-{
-  "id": "<sha256 hex>",
-  "pubkey": "<32-byte hex pubkey>",
-  "created_at": 1700003600,
-  "kind": 1316,
-  "tags": [
-    ["e", "<referenced-event-id-hex>"],
-    ["g", "u09t"],
-    ["g", "u09tv"],
-    ["g", "u09tvw"],
-    ["status", "still_there"],
-    ["lat", "48.8566140"],
-    ["lon", "2.3522219"],
-    ["expiration", "1701213200"],
-    ["alt", "Roadstr: event confirmed"]
-  ],
-  "content": "",
-  "sig": "<64-byte hex signature>"
-}
-```
+A report is **117 bytes plus its comment** (0–48 UTF-8 bytes, 165 bytes maximum — the MeshCore
+channel-data payload limit). A vote is **134 bytes** and needs no other event to be rebuilt.
 
-**Tag Definitions (canonical order)**:
+| Frame | Layout |
+|---|---|
+| Report | flags, pubkey(32), created_at(4), latE6(4), lonE6(4), category(1), expiration(4), maxspeed(2, 0 = absent), comment length(1), comment(N), signature(64) |
+| Vote | flags, pubkey(32), created_at(4), report id(32), status(1), signature(64) |
 
-| # | Tag | Description |
-|---|-----|-------------|
-| 1 | `e` | Referenced event ID (the report being confirmed/denied) |
-| 2-4 | `g` | Geohashes of the referenced report at precision 4, 5, 6 |
-| 5 | `status` | `"still_there"` or `"no_longer_there"` |
-| 6 | `lat` | Latitude of the referenced report, 7 decimals |
-| 7 | `lon` | Longitude of the referenced report, 7 decimals |
-| 8 | `expiration` | NIP-40 expiry timestamp (always `created_at + 1209600`) |
-| 9 | `alt` | Human-readable fallback (NIP-31): `"Roadstr: event confirmed"` / `"Roadstr: event denied"` |
+Integers are big-endian. Coordinates are degrees × 10^6 in int32. The flags byte is
+`version(4) | class(1) | ephemeral hint(1) | reserved(2)`, version 0, class 0 for reports and 1 for
+votes. The flags byte is not signed.
 
-> Corrected: earlier revisions listed only `e, status, expiration, alt`. Real events carry the
-> referenced report's geohashes and position so that one `#g` query finds report and votes.
+Encoding and decoding rules, refusal reasons and the exact rebuild algorithm are in the NIP. The
+short version: the encoder rebuilds the event from its own frame and refuses unless tags, key, time,
+content and signature are identical; the decoder rebuilds tags by fixed rules, formats coordinates
+from integers (never `String.format`), and the caller verifies the signature.
 
-### 3.4 Event Types (Enum)
+The previous 110-byte frame over the `alt`-bearing layout is obsolete. Its vote frame has the same
+length as the new one but a different meaning, so implementations must not mix versions.
 
-| Value | String | Default TTL | Color | Icon |
-|-------|--------|-------------|-------|------|
-| 0 | `police` | 2 hours | #0000FF Blue | 👮 |
-| 1 | `speed_camera` | 30 days | #800080 Purple | 📷 |
-| 2 | `traffic_jam` | 1 hour | #FF8C00 Orange | 🚗 |
-| 3 | `accident` | 3 hours | #FF0000 Red | 💥 |
-| 4 | `road_closure` | 7 days | #8B0000 Dark Red | 🚫 |
-| 5 | `construction` | 7 days | #FFD700 Gold | 🚧 |
-| 6 | `hazard` | 4 hours | #FF4500 OrangeRed | ⚠️ |
-| 7 | `road_condition` | 6 hours | #4682B4 SteelBlue | 🛣️ |
-| 8 | `pothole` | 7 days | #795548 Brown | 🕳️ |
-| 9 | `fog` | 3 hours | #9E9E9E Gray | 🌫️ |
-| 10 | `ice` | 6 hours | #00CED1 Cyan | 🧊 |
-| 11 | `animal` | 1 hour | #4CAF50 Green | 🦌 |
-| 12–254 | *reserved* | — | — | — |
-| 255 | `other` | 2 hours | #808080 Gray | ℹ️ |
+### 4.1 Mesh transport
 
-The `other` type (value 255) may use the `content` field for a description. It is representable in a frame only when `content` is empty; a comment makes the event non-representable, and every type with a comment is refused by a strict encoder.
-
----
-
-## 4. Compact Binary Format (Mesh-Ready)
-
-The binary format enables transfer over MeshCore mesh networks. It fits in one channel datagram (165 bytes is the firmware's payload limit) and contains enough information to reconstruct a fully verifiable Nostr event.
-
-### 4.1 Design Constraints
-
-| Field | Size | Notes |
-|-------|------|-------|
-| Signature | 64 bytes | Schnorr signature (non-negotiable for verification) |
-| Public key | 32 bytes | secp256k1 pubkey (non-negotiable for verification) |
-| **Remaining** | **39 bytes** | For timestamp, coordinates, type, metadata |
-
-### 4.2 Report Event Binary Layout (110 bytes)
-
-```
-Offset  Size  Field
-─────────────────────────────────────
-0       1     Version/flags byte
-1       32    Public key (raw bytes)
-33      4     created_at (uint32 big-endian, unix seconds)
-37      4     Latitude (int32 big-endian, value × 10^7)
-41      4     Longitude (int32 big-endian, value × 10^7)
-45      1     Event type (enum byte, 0–255)
-46      64    Signature (raw bytes, 64 bytes Schnorr sig)
-─────────────────────────────────────
-Total: 110 bytes
-```
-
-**Version/flags byte**:
-```
-Bits 7-4: Version (0 = v1)
-Bit 3:    Event class (0 = report, 1 = confirmation)
-Bit 2:    Ephemeral hint (0 = persistent key, 1 = one-time key) — NOT signed, never evidence
-Bits 1-0: Reserved
-```
-
-**Coordinate Encoding**:
-- Latitude: `int32(lat × 10^7)` — range ±900000000, precision ~1.1cm
-- Longitude: `int32(lon × 10^7)` — range ±1800000000, precision ~1.1cm
-- Example: 48.8566140°N → `488566140` → `0x1D1EED7C`
-- Encoding MUST read the value from the `lat`/`lon` tag text; `(lat * 1e7).toLong()` truncates and produces unverifiable frames for about 6 % of coordinates
-- Decoding MUST format from the integer (`-?D+.DDDDDDD`), never with `String.format("%.7f")`, which follows the device locale and writes a comma
-
-### 4.3 Confirmation Event Binary Layout (134 bytes)
-
-```
-Offset  Size  Field
-─────────────────────────────────────
-0       1     Version/flags byte (bit 3 = 1)
-1       32    Public key (raw bytes)
-33      4     created_at (uint32 big-endian)
-37      32    Referenced event ID (raw bytes, sha256)
-69      1     Status (0 = no_longer_there, 1 = still_there)
-70      64    Signature (raw bytes)
-─────────────────────────────────────
-Total: 134 bytes
-```
-
-### 4.4 Reconstruction Algorithm
-
-To reconstruct a full Nostr event from the binary representation:
-
-**For Report Events:**
-
-1. Extract fields from binary
-2. Compute geohash from lat/lon at levels 4, 5, 6
-3. Look up type string from enum byte
-4. Compute expiration: `created_at + 1209600` (14 days, fixed constant)
-5. Format coordinates as decimal strings (7 decimal places)
-6. Assemble canonical tag array (fixed order per §3.2)
-7. Set content to `""`
-8. Set kind to `1315`
-9. Serialize as JSON: `[0, <pubkey_hex>, <created_at>, 1315, <tags>, ""]`
-10. Compute event ID: `sha256(serialized)`
-11. Verify: `schnorr_verify(id, sig, pubkey)`
-
-**For Confirmation Events:**
-
-1. Extract fields from binary
-2. Look up the referenced report (cache or relay) for its `lat`/`lon` — the frame does not carry
-   them — and reject the confirmation if its coordinates differ from the report's
-3. Compute expiration: `created_at + 1209600` (14 days, fixed constant)
-3. Assemble canonical tag array (fixed order per §3.3, including expiration tag)
-4. Set content to `""`
-5. Set kind to `1316`
-6. Serialize, compute ID, verify signature
-
-**Canonical JSON Serialization Rules (for ID computation)**:
-- No whitespace between elements
-- Tags array elements in exact order defined above
-- Coordinate strings: no trailing zeros beyond 7 decimal places, no leading zeros
-- Latitude format: `-?[0-9]{1,2}\.[0-9]{7}` (always 7 decimal places)
-- Longitude format: `-?[0-9]{1,3}\.[0-9]{7}` (always 7 decimal places)
-
-### 4.5 Mesh Transport
-
-The frame is sent unchanged as one MeshCore **channel data datagram** on the public `#roadstr`
-hashtag channel, with `data_type` `0xFF52` until a stable value is registered with MeshCore. The
-110/134 bytes fit in the 165-byte payload limit of current companion firmware; never send 166 or
-167 bytes, which pass one check and then fail permanently in the radio.
-
-Receiving nodes:
-1. Check length, version, reserved bits, type, coordinate range and status (cheapest checks first)
-2. Reconstruct the full Nostr event and verify its signature
-3. If valid, publish to configured Nostr relays (internet bridge) and use it as if it came from Nostr
-
-Mesh nodes act as bridges between the mesh network and the Nostr relay network. A bridge must
-never change author, ID or signature, must de-duplicate by event ID across transports, and must
-rate-limit both directions. The authoritative parameters, refusal reasons and limits are in
-[`nips/road-events.md`](nips/road-events.md); the independent client's bridge design and the
-hardware validation checklist are in [`docs/ecosystem.md`](docs/ecosystem.md).
-
----
+The frame is sent unchanged in one MeshCore channel-data datagram (`0x3E`) on the public `#roadstr`
+hashtag channel with `data_type` `0xFF52` until a stable value is registered. A bridge must never
+change author, ID or signature, must de-duplicate by event ID across transports, and must rate-limit
+both directions. See the NIP for parameters and `docs/ecosystem.md` for the bridge design and the
+hardware checklist.
 
 ## 5. Expiration & Confirmation System
 
-### 5.1 Relay Expiration vs Effective TTL
+Two lifetimes, often confused:
 
-This specification distinguishes between two expiration concepts:
-
-**Relay-side expiration (NIP-40):** The `expiration` tag in Nostr events is ALWAYS set to:
-```
-expiration = created_at + 1209600  (14 days)
-```
-
-This fixed constant applies to ALL event types. It tells relays when to garbage-collect the event. The 14-day window is long enough that confirmations can extend the effective lifetime of an event without the underlying data being deleted. It also ensures deterministic reconstruction from binary format.
-
-**Effective TTL (client-side):** Clients compute an _effective expiration_ from the event type's default TTL (see §3.4) and any confirmations received. This determines when to stop displaying the marker.
-
-### 5.2 Effective Expiration Calculation
-
-Clients compute the **effective expiration** by aggregating confirmations:
-
-```kotlin
-fun computeEffectiveExpiry(
-    report: RoadEvent,
-    confirmations: List<Confirmation>
-): Long {
-    val baseTTL = report.type.defaultTTL
-    var effectiveExpiry = report.createdAt + baseTTL
-
-    // Sort confirmations by timestamp
-    val sorted = confirmations.sortedBy { it.createdAt }
-
-    for (conf in sorted) {
-        when (conf.status) {
-            STILL_THERE -> {
-                // Extend expiry from confirmation time
-                val newExpiry = conf.createdAt + baseTTL
-                effectiveExpiry = maxOf(effectiveExpiry, newExpiry)
-            }
-            NO_LONGER_THERE -> {
-                // Immediately expire at denial time
-                effectiveExpiry = minOf(effectiveExpiry, conf.createdAt)
-            }
-        }
-    }
-
-    return effectiveExpiry
-}
-```
-
-### 5.3 Conflict Resolution
-
-When conflicting confirmations exist within a time window:
-
-1. Collect all confirmations in the last `CONFLICT_WINDOW` (5 minutes)
-2. Count `still_there` vs `no_longer_there`
-3. Majority wins
-4. Ties: event remains active (benefit of the doubt)
-
-```kotlin
-fun resolveConflicts(
-    confirmations: List<Confirmation>,
-    now: Long,
-    conflictWindow: Long = 300 // 5 minutes
-): EffectiveStatus {
-    val recent = confirmations.filter { now - it.createdAt < conflictWindow }
-    if (recent.isEmpty()) return ACTIVE
-
-    val stillThere = recent.count { it.status == STILL_THERE }
-    val noLonger = recent.count { it.status == NO_LONGER_THERE }
-
-    return if (noLonger > stillThere) EXPIRED else ACTIVE
-}
-```
-
-### 5.4 Display Behavior
-
-| Condition | Visual | Behavior |
-|-----------|--------|----------|
-| Active, recently confirmed | Full opacity marker | Alert on approach |
-| Active, near expiry (< 25% TTL remaining) | Semi-transparent marker | Alert on approach |
-| Expired | Not shown | No alert |
-| Denied by majority | Not shown | No alert |
-
----
+* **Relay retention.** The `expiration` tag is `created_at + max(1209600, lifetime)` — 14 days for
+  most categories, 30 for the long-lived ones. The floor exists so votes can extend a report; if
+  relays dropped a police report after 4 hours, a "still there" at hour five could not extend it.
+  Readers accept any parseable `expiration` value, because older clients wrote `created_at +
+  lifetime`.
+* **Display lifetime.** `created_at + lifetime`, extended by every `still_there`
+  (`max(expiry, vote.created_at + lifetime)`) and cut by every `no_longer_there`
+  (`min(expiry, vote.created_at)`), never past the event's `expiration`. Only the latest vote of a
+  key counts; a vote older than its report or more than five minutes in the future is ignored; ties
+  apply denials first; a report is hidden while the last five minutes contain more denials than
+  confirmations.
 
 ## 6. Geohash & Spatial Querying
 
-### 6.1 Geohash Precision Levels
+### 6.1 Precision levels
 
-| Level | Chars | Cell Size | Use Case |
-|-------|-------|-----------|----------|
-| 4 | `u09t` | ~20km × 20km | Regional/highway queries |
-| 5 | `u09tv` | ~5km × 5km | City-level queries |
-| 6 | `u09tvw` | ~1.2km × 0.6km | Neighborhood queries |
+| Level | Example (Paris) | Cell size | Use |
+|---|---|---|---|
+| 4 | `u09t` | ~20 km × 20 km | highway / regional |
+| 5 | `u09tv` | ~5 km × 5 km | city |
+| 6 | `u09tvw` | ~1.2 km × 0.6 km | neighbourhood |
 
-Each report event includes all three levels as separate `g` tags, enabling queries at different zoom levels.
+Reports carry all three; geohashes are derived from the six-decimal position.
 
-### 6.2 Querying Strategy
+### 6.2 Querying
 
-To query events in the user's visible area:
-
-1. Determine the user's current position
-2. Compute the geohash at the appropriate level for the current zoom/speed:
-   - Driving on highway (>80 km/h): query level 4 (covers ~20km ahead)
-   - Driving in city (<80 km/h): query level 5 (covers ~5km)
-   - Stationary/browsing map: query level 6 for visible area
-3. Query the center cell and 8 surrounding cells (9 cells total) to avoid boundary effects
-4. Subscribe to Nostr relay with filter:
+Reports are found by `#g`; votes are found by `#e` for the report IDs in view (a vote has no
+position, so `#g` cannot find it). Two subscriptions:
 
 ```json
-{
-  "kinds": [1315, 1316],
-  "#g": ["u09k", "u09m", "u09q", "u09s", "u09t", "u09u", "u09v", "u09w", "u09y"],
-  "since": <now - max_ttl>
-}
-```
-
-### 6.3 Subscription Management
-
-- Maintain a rolling subscription as the user moves
-- Re-subscribe when the user moves to a new geohash cell
-- Keep confirmations (kind 1316) linked to visible reports via `#e` filter
-- Unsubscribe from cells that are no longer relevant
-
-```json
-// Primary subscription: reports in area
-["REQ", "roadstr-reports", {
+["REQ", "road-reports", {
   "kinds": [1315],
   "#g": ["u09ts", "u09tt", "u09tu", "u09tv", "u09tw", "u09ty", "u09wh", "u09wj", "u09wn"],
   "since": 1699993200
 }]
 
-// Secondary subscription: confirmations for visible reports
-["REQ", "roadstr-confirmations", {
+["REQ", "road-votes", {
   "kinds": [1316],
-  "#e": ["<event-id-1>", "<event-id-2>", ...]
+  "#e": ["<visible report id>", "…"]
 }]
 ```
 
----
+Query at the precision that matches zoom and speed (level 4 on a highway, 5 in a city, 6 when
+stationary), include the centre cell and its eight neighbours, and use a `since` that covers the
+longest lifetime (30 days) on a cold start.
+
+### 6.3 Subscription management
+
+* Maintain a rolling subscription as the user moves; re-subscribe when the cell changes.
+* Refresh the `#e` vote subscription when the set of visible reports changes.
+* Unsubscribe from cells that are no longer relevant.
 
 ## 7. OsmAnd Plugin Integration
 
@@ -700,7 +456,7 @@ User taps "Report" widget
     → User selects event type
     → Plugin reads current GPS position
     → Plugin computes geohash (levels 4, 5, 6)
-    → Plugin computes expiration (created_at + type_TTL)
+    → Plugin computes expiration (created_at + max(14 days, type lifetime))
     → Plugin assembles Nostr event (kind 1315, canonical tags)
     → Plugin signs event with nsec (or ephemeral key)
     → Plugin publishes to all configured relays
@@ -753,13 +509,11 @@ Standard WebSocket protocol:
 
 The `expiration` tag signals to relays that the event can be garbage-collected after the timestamp. Relays SHOULD NOT serve expired events. This naturally cleans up old road reports.
 
-### 13.3 Unknown Kind Handling (NIP-31)
+### 13.3 Unknown Kind Handling
 
-The `alt` tag provides a human-readable description for clients that don't understand kind 1315/1316:
-
-```
-["alt", "Roadstr: police report at 48.856614, 2.352222"]
-```
+The format has no `alt` tag: adding one would change every event ID and make the event impossible to
+frame. A client that does not know kinds 1315/1316 simply ignores them; NIP-31 was traded away for a
+brand-free, exactly-rebuildable canonical form.
 
 ### 13.4 Event ID Computation
 
@@ -806,44 +560,47 @@ Where `serialize` produces minimal JSON (no whitespace, proper escaping per NIP-
 
 ## 15. Binary Format — Worked Example
 
-The values below are one of the published conformance vectors (test key and signature are
-throw-away material). Earlier revisions of this section had wrong hex values and wrong
-geohashes; do not use them.
+Values from the unit-test vector; the event ID was recomputed from the NIP-01 serialisation by an
+independent implementation.
 
 **Inputs:**
 - Public key: `96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453`
 - Timestamp: `1700000000` → `0x6553F100`
-- Latitude: `48.8566140` → `488566140` → `0x1D1EED7C`
-- Longitude: `2.3522219` → `23522219` → `0x0166EBAB`
-- Type: `0` (police)
+- Latitude: `48.856614` → `48 856 614` → `0x02E97E26`
+- Longitude: `2.352222` → `2 352 222` → `0x0023E45E`
+- Category: `0` (police)
 - Geohashes: `u09t`, `u09tv`, `u09tvw`
 - Expiration: `1701209600` → `0x65666600`
+- Comment: empty; `maxspeed`: absent
 
-**Frame (hex):**
+**Frame (117 bytes):**
 ```
-00                              # v1, report, persistent key
+00                              # version 0, report, persistent key
 96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453
 6553F100                        # created_at
-1D1EED7C                        # latitude x 10^7
-0166EBAB                        # longitude x 10^7
-00                              # type: police
-a10bc13575ef963531acc54afc13445f198fe8b507d07d0fd4f2710e358bae17
-c1962feca23cc7022d31e5b813430e6ad74e3e8cc7df126d7bce45798bd0ee05
+02E97E26                        # latitude x 10^6
+0023E45E                        # longitude x 10^6
+00                              # category: police
+65666600                        # expiration
+0000                            # maxspeed: absent
+00                              # comment length: 0
+aa…aa                           # 64-byte signature (test material)
 ```
 
 **Reconstructed event ID:**
-`c4fc8b221dea97c31b73423abafde550d64d06e3b4df771c1d41ee328b3e251a`
+`dac79ddf0e4aeb64f56f454497afd54e7926e19a5d3c062f75c25e226f4fcbca`
 
 **Reconstructed tags:**
 ```
-t=police  g=u09t,u09tv,u09tvw  lat=48.8566140  lon=2.3522219
-expiration=1701209600  alt="Roadstr: police report"
+lat=48.856614  lon=2.352222  g=u09t,u09tv,u09tvw  t=police  expiration=1701209600
 ```
 
-The full vector set, including invalid and non-representable cases, is published by the
-independent Roadstr client; Roadbeacon pins this vector as a unit test.
+A 48-byte comment adds 48 bytes before the signature (165 total). `maxspeed` is a uint16 after
+`expiration`, 0 meaning the tag is absent.
 
----
+A new shared vector file for this layout is still to be generated; until then this example and the
+`BinaryCodecTest` fixture are the contract. The vector file published by the Roadstr client describes
+the deprecated layout and cannot be used.
 
 ## 16. Error Handling
 
@@ -898,8 +655,8 @@ app/
 │   │   │   ├── EventSigner.kt         # Signing/verification
 │   │   │   ├── Subscription.kt        # REQ/CLOSE management
 │   │   │   ├── BinaryCodec.kt         # Strict frame encoder/decoder
-│   │   │   ├── CanonicalCoordinates.kt # Integer E7 parse/format
-│   │   │   └── ProtocolText.kt        # Frozen v1 alt/expiration strings
+│   │   │   ├── RoadEventFormat.kt     # Retention rule and comment limit
+│   │   │   └── CanonicalCoordinates.kt # Integer E6 parse/format
 │   │   ├── model/
 │   │   │   ├── RoadEvent.kt           # Road event domain model
 │   │   │   ├── EventType.kt           # Type enum with TTL/colors

@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
-      const unsigned = createConfirmationEvent(eventId, status, report.lat, report.lon);
+      const unsigned = createConfirmationEvent(eventId, status);
       const signed = await signEvent(unsigned);
 
       const relayStates = new Map();

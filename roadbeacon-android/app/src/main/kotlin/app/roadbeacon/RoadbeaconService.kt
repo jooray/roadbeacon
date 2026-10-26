@@ -268,7 +268,7 @@ class RoadbeaconService : Service() {
             return
         }
 
-        val expiration = expTag?.get(1)?.toLongOrNull() ?: (event.createdAt + type.defaultTTL)
+        val expiration = expTag?.get(1)?.toLongOrNull() ?: RoadEventFormat.expirationFor(event.createdAt, type)
 
         val roadEvent = RoadEvent(
             id = event.id,

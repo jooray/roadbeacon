@@ -129,7 +129,7 @@ class WidgetManager(
         }
 
         Log.i(TAG, "Publishing confirmation: status=${status.value} for event=$pointId")
-        val event = EventSigner.createConfirmationEvent(pointId, status, originalEvent.lat, originalEvent.lon, privKey)
+        val event = EventSigner.createConfirmationEvent(pointId, status, privKey)
         nostrClient.publish(event)
         Log.i(TAG, "Confirmation published: eventId=${event.id.take(8)}")
     }
