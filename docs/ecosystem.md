@@ -3,7 +3,7 @@
 **Two apps, one event format, and what to do next**
 
 Status: **proposal**, 2026-10-26. Written after reading `roadstrapp/roadstr-app` at
-`main` (version 1.2.3, commit from 2026-10), its interoperability specification and
+`main` (`9cb5352`, 2026-10-25, version 1.2.3), its interoperability specification and
 test vectors, and comparing them with this repository's clients.
 
 ---
