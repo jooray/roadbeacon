@@ -67,6 +67,24 @@ class BinaryCodecTest {
     }
 
     @Test
+    fun `frame with maxspeed and comment matches the published offsets`() {
+        val expected = (
+            "00" +
+                "96cadb55d2b283776471521f22d5ef9e78c2dc816db69fb6cf70eaa08231b453" +
+                "6553f100" + "02e97e26" + "0023e45e" + "01" + "65666600" + "0032" + "03" + "616263" +
+                "cc".repeat(64)
+            ).hexToBytes()
+        val event = report(
+            type = EventType.SPEED_CAMERA,
+            content = "abc",
+            speedLimitKmh = 50,
+            sig = "cc".repeat(64)
+        )
+        assertArrayEquals(expected, BinaryCodec.encodeReport(event))
+        assertEquals(120, expected.size)
+    }
+
+    @Test
     fun `round trip report preserves tags, content, key, time and signature`() {
         val event = report(content = "police checking seatbelts")
         val decoded = BinaryCodec.decodeReport(BinaryCodec.encodeReport(event)!!)!!
@@ -257,7 +275,8 @@ class BinaryCodecTest {
         content: String = "",
         speedLimitKmh: Int? = null,
         extraTag: List<String>? = null,
-        moveTypeFirst: Boolean = false
+        moveTypeFirst: Boolean = false,
+        sig: String = "aa".repeat(64)
     ): NostrEvent {
         val tags = BinaryCodec.reportTags(
             latE6,
@@ -287,7 +306,7 @@ class BinaryCodecTest {
             kind = 1315,
             tags = tags,
             content = content,
-            sig = "aa".repeat(64)
+            sig = sig
         ).let { it.copy(id = it.computeId()) }
     }
 
