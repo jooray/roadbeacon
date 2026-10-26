@@ -136,7 +136,8 @@ The report frame carries key, time, lat/lon (×10⁶), category, `expiration`, `
 status and signature; nothing needs to be looked up.
 
 48 bytes of comment is ≈48 Latin characters or ≈16 CJK characters — enough for "police checking
-seatbelts". Two-packet comments were considered and rejected: partial events and reassembly state
+seatbelts". Over a BLE companion link the usable datagram is 163 bytes, so 46 comment bytes is the
+practical limit unless the transport is serial/USB (165). Two-packet comments were considered and rejected: partial events and reassembly state
 are not worth it for a comment that long. If field data ever says otherwise, that is a new frame
 version, not a silent change.
 

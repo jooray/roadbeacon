@@ -326,7 +326,9 @@ protocol), with:
 - `data_type`: `0xFF52` (inside the firmware's unregistered testing range) until a stable value is
   registered with MeshCore in `0100–FEFF`;
 - payload: 117–165 bytes for a report, 134 for a vote; never 166–167, which pass one check and then
-  fail permanently in the radio.
+  fail permanently in the radio. A BLE companion link caps a datagram at 163 bytes (the notification
+  size), so in practice a report with a comment longer than 46 bytes is relay-only; radio-first
+  clients should keep comments short.
 
 Rate limits, de-duplication and bridge consent are part of any implementation's obligations: a
 report is 117–165 bytes, roughly 0.6–0.9 s of airtime at SF9/125 kHz, so a misbehaving bridge is a
