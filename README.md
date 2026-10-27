@@ -132,6 +132,17 @@ See `nips/road-events.md` for the specification. The format is called **Road Eve
 - `nips/road-events.md` — Draft NIP for kinds 1315/1316 (ready for submission to nostr-protocol/nips)
 - `reference/osmand-aidl.md` — OsmAnd plugin API documentation
 
+## Follow on Nostr
+
+Roadbeacon has its own Nostr identity (NIP-05 `roadbeacon@cypherpunk.today`):
+
+- `nostr:npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h`
+- [njump.me](https://njump.me/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h)
+- [Primal](https://primal.net/p/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h)
+- [YakiHonne](https://yakihonne.com/users/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h)
+
+npub: `npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h`
+
 ## Support and Value4Value
 
 If you like this project, I would appreciate if you contributed time, talent, or treasure.

@@ -1276,3 +1276,43 @@ textarea:focus-visible {
   background: var(--color-primary);
   color: white;
 }
+
+/* Follow on Nostr block (relay dialog) */
+.follow-nostr {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-outline-light);
+}
+
+.follow-nostr h4 {
+  margin: 0 0 var(--space-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.follow-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-lg);
+  margin: 0 0 var(--space-sm);
+  font-size: 13px;
+}
+
+.follow-links a {
+  color: var(--color-primary-light);
+  text-decoration: none;
+}
+
+.follow-links a:hover {
+  text-decoration: underline;
+}
+
+.follow-npub {
+  display: block;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  user-select: all;
+}
