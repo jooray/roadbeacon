@@ -47,7 +47,7 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="hero"><div class="wrap">
-  <img class="logo" src="img/icon-512.png" width="96" height="96" alt="Roadbeacon icon: a white road warning triangle on indigo">
+  <img class="logo" src="img/icon-192.png" width="96" height="96" alt="Roadbeacon icon: a white road warning triangle on indigo">
   <h1>Roadbeacon</h1>
   <p class="lead">A decentralized road event reporting system, Waze without the centralized tracking. Drivers report and see police, accidents, construction and hazards as signed Nostr events shared over relays. There is no central authority.</p>
   <div class="btns">
@@ -61,15 +61,15 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
   <h2 id="how">How it works</h2>
   <ol class="steps">
     <li><strong>Report.</strong> A driver picks a category (police, accident, road closure, construction, hazard and others). The app builds a Nostr event with the position, a geohash and an expiry time, and signs it with the driver's key. The key can be a persistent identity or an ephemeral one.</li>
-    <li><strong>Share.</strong> The signed event is published to Nostr relays. It can also travel as a compact binary message over MeshCore mesh networks.</li>
+    <li><strong>Share.</strong> The signed event is published to Nostr relays. It can also travel as a compact binary message over MeshCore LoRa mesh networks (experimental, through a MeshCore Open build with the local API).</li>
     <li><strong>See and confirm.</strong> Other drivers query relays by geohash and see the reports as markers on the map. They can confirm "still there" or deny "no longer there". Reports expire by type, for example after 1 hour for traffic jams and 30 days for speed cameras.</li>
   </ol>
   <figure>
-    <img src="img/screenshot-web.png" width="1299" height="629" alt="Roadbeacon web app: a map with report markers and a popup with Still there and Gone buttons" loading="lazy">
+    <picture><source srcset="img/screenshot-web.webp" type="image/webp"><img src="img/screenshot-web.png" width="1299" height="629" alt="Roadbeacon web app: a map with report markers and a popup with Still there and Gone buttons" loading="lazy"></picture>
     <figcaption>The web app.</figcaption>
   </figure>
   <figure>
-    <img src="img/screenshot-android.png" width="1080" height="1096" alt="Roadbeacon Android app next to OsmAnd showing events and a Report button" loading="lazy">
+    <picture><source srcset="img/screenshot-android.webp" type="image/webp"><img src="img/screenshot-android.png" width="1080" height="1096" alt="Roadbeacon Android app next to OsmAnd showing events and a Report button" loading="lazy"></picture>
     <figcaption>The Android app (left) and its OsmAnd integration with the Report button (right).</figcaption>
   </figure>
 </section>
