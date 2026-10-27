@@ -3,7 +3,8 @@
 import { initMap, setClickHandler, setConfirmHandler, addEventMarker, updateMarkerCounts, removeExpired, getCenter, getZoom, onMoveEnd } from './map.js';
 import { connect, subscribe, subscribeRoadEvents, subscribeConfirmations, fetchEventById, publish, closeSub, close, getRelays, addRelay, removeRelay, resetRelays, getDefaultRelays, getRelayStatus, setRelayStatusCallback } from './nostr.js';
 import { initAuth, signEvent, getAuthMode, getPubkey, logout, hasStoredKey } from './auth.js';
-import { EVENT_TYPES, createReportEvent, createConfirmationEvent, parseReportEvent, computeEffectiveTTL, isExpired } from './roadbeacon.js';
+import { watchForUpdates } from './update.js';
+import { EVENT_TYPES, createReportEvent, createConfirmationEvent, parseReportEvent, computeEffectiveTTL, isExpired, admissibleVotes } from './roadbeacon.js';
 import { encode as geohashEncode, neighbors } from './geohash.js';
 
 // State
@@ -111,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update marker counts
       const confs = confirmations.get(eventId);
-      const counts = computeConfirmationCounts(confs);
+      const counts = computeConfirmationCounts(reports.get(eventId), confs);
       updateMarkerCounts(eventId, counts);
 
       // Show result
@@ -152,6 +153,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Periodic cleanup
   setInterval(cleanupExpired, 30000);
+
+  // A new deploy refreshes open pages by itself.
+  watchForUpdates(version => showToast(`Roadbeacon updated to ${version}, reloading…`, 2500));
 });
 
 // --- Auth UI ---
@@ -527,8 +531,9 @@ function resubscribe() {
 
   console.log(`[roadbeacon] Subscribing with geohashes:`, newGeohashes, `precision:`, QUERY_PRECISION, `(${geohashes.length - newGeohashes.length} cached)`);
 
-  // Subscribe since 14 days ago (relay expiration window)
-  const since = Math.floor(Date.now() / 1000) - 1209600;
+  // Cover the longest display lifetime (speed cameras, 30 days); the cache drops what has expired.
+  const longest = Math.max(...EVENT_TYPES.map(t => t.defaultTTL));
+  const since = Math.floor(Date.now() / 1000) - longest;
 
   // Use new batched subscription that fetches both reports and confirmations
   // and waits for EOSE before processing
@@ -594,7 +599,7 @@ function processInitialLoad(rawReports, rawConfirmations) {
 
     // Add to map
     const expiry = computeEffectiveTTL(parsed, confs);
-    const counts = computeConfirmationCounts(confs);
+    const counts = computeConfirmationCounts(parsed, confs);
     addEventMarker(parsed, expiry, counts);
     displayed++;
   }
@@ -629,7 +634,7 @@ function handleRealtimeEvent(event) {
     // Store and display
     reports.set(parsed.id, parsed);
     const expiry = computeEffectiveTTL(parsed, confs);
-    const counts = computeConfirmationCounts(confs);
+    const counts = computeConfirmationCounts(parsed, confs);
     addEventMarker(parsed, expiry, counts);
 
   } else if (event.kind === 1316) {
@@ -657,7 +662,7 @@ function handleRealtimeEvent(event) {
         confirmations.delete(targetId);
       } else {
         // Update counts and expiry
-        const counts = computeConfirmationCounts(confs);
+        const counts = computeConfirmationCounts(report, confs);
         updateMarkerCounts(targetId, counts);
       }
     } else {
@@ -672,10 +677,11 @@ function handleRealtimeEvent(event) {
   }
 }
 
-function computeConfirmationCounts(confs) {
+function computeConfirmationCounts(report, confs) {
   let confirmed = 0;
   let denied = 0;
-  for (const c of confs) {
+  // Only the votes that count: one per key, none before the report or far in the future.
+  for (const c of report ? admissibleVotes(report, confs) : confs) {
     const statusTag = c.tags.find(t => t[0] === 'status');
     if (!statusTag) continue;
     if (statusTag[1] === 'still_there') {

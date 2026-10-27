@@ -44,22 +44,24 @@ class EventCache {
 
     fun addConfirmation(confirmation: Confirmation) {
         val list = confirmations.getOrPut(confirmation.eventId) { mutableListOf() }
-        if (list.none { it.id == confirmation.id }) {
-            list.add(confirmation)
+        synchronized(list) {
+            if (list.none { it.id == confirmation.id }) {
+                list.add(confirmation)
+            }
         }
     }
 
     fun getReport(id: String): RoadEvent? = reports[id]
 
     fun getConfirmations(eventId: String): List<Confirmation> =
-        confirmations[eventId]?.toList() ?: emptyList()
+        confirmations[eventId]?.let { synchronized(it) { it.toList() } } ?: emptyList()
 
     fun getAllActiveReports(): List<RoadEvent> {
         val now = System.currentTimeMillis() / 1000
         return reports.values.filter { report ->
-            val effectiveExpiry = computeEffectiveExpiry(report, getConfirmations(report.id))
-            val status = resolveConflicts(getConfirmations(report.id), now)
-            now < effectiveExpiry && status == EffectiveStatus.ACTIVE
+            val votes = admissible(report, getConfirmations(report.id), now)
+            val effectiveExpiry = computeEffectiveExpiry(report, votes, now)
+            now < effectiveExpiry && resolveConflicts(votes, now) == EffectiveStatus.ACTIVE
         }
     }
 
@@ -69,12 +71,42 @@ class EventCache {
         _eventsChanged.tryEmit(Unit)
     }
 
-    fun computeEffectiveExpiry(report: RoadEvent, confs: List<Confirmation>): Long {
+    /**
+     * The votes that count for [report] (nips/road-events.md, "Display lifetime"): one voice per key,
+     * its latest vote, and nothing older than the report or more than five minutes in the future.
+     * On a tie between a key's own votes, "still there" wins.
+     */
+    fun admissible(
+        report: RoadEvent,
+        confs: List<Confirmation>,
+        now: Long = System.currentTimeMillis() / 1000
+    ): List<Confirmation> {
+        val latest = HashMap<String, Confirmation>()
+        for (conf in confs) {
+            if (conf.createdAt < report.createdAt) continue
+            if (conf.createdAt > now + MAX_FUTURE_SKEW_SECONDS) continue
+            val known = latest[conf.pubkey]
+            val newer = known == null ||
+                conf.createdAt > known.createdAt ||
+                (conf.createdAt == known.createdAt && conf.status == ConfirmationStatus.STILL_THERE)
+            if (newer) latest[conf.pubkey] = conf
+        }
+        return latest.values.toList()
+    }
+
+    fun computeEffectiveExpiry(
+        report: RoadEvent,
+        confs: List<Confirmation>,
+        now: Long = System.currentTimeMillis() / 1000
+    ): Long {
         val baseTTL = report.type.defaultTTL
         var effectiveExpiry = report.createdAt + baseTTL
 
-        // A vote cannot predate its report; ignore anything older.
-        val sorted = confs.filter { it.createdAt >= report.createdAt }.sortedBy { it.createdAt }
+        // Same timestamp: the denial first, so a tie keeps the report alive.
+        val sorted = admissible(report, confs, now).sortedWith(
+            compareBy<Confirmation> { it.createdAt }
+                .thenBy { it.status == ConfirmationStatus.STILL_THERE }
+        )
 
         for (conf in sorted) {
             when (conf.status) {
@@ -95,6 +127,7 @@ class EventCache {
         return effectiveExpiry
     }
 
+    /** [confs] must already be [admissible], or one key can outvote everyone else. */
     fun resolveConflicts(
         confs: List<Confirmation>,
         now: Long,
@@ -112,8 +145,7 @@ class EventCache {
     private fun cleanupExpired() {
         val now = System.currentTimeMillis() / 1000
         val expired = reports.values.filter { report ->
-            val effectiveExpiry = computeEffectiveExpiry(report, getConfirmations(report.id))
-            now >= effectiveExpiry
+            now >= computeEffectiveExpiry(report, getConfirmations(report.id), now)
         }
         expired.forEach { removeReport(it.id) }
         if (expired.isNotEmpty()) {
@@ -126,5 +158,9 @@ class EventCache {
     fun clear() {
         reports.clear()
         confirmations.clear()
+    }
+
+    companion object {
+        const val MAX_FUTURE_SKEW_SECONDS = 300L
     }
 }

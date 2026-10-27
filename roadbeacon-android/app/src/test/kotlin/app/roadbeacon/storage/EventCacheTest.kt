@@ -172,6 +172,49 @@ class EventCacheTest {
 
     // Helper methods
 
+    @Test
+    fun `one key has one voice, its latest vote`() {
+        val report = createReport("id1", createdAt = 1000L)
+        val spam = (1..5).map {
+            createConfirmation("d$it", "id1", ConfirmationStatus.NO_LONGER_THERE, 2000L + it, pubkey = "troll")
+        }
+        val votes = cache.admissible(report, spam + createConfirmation(
+            "c1", "id1", ConfirmationStatus.STILL_THERE, 2001L, pubkey = "a"
+        ), now = 2010L)
+        assertEquals(2, votes.size)
+        assertEquals(2005L, votes.first { it.pubkey == "troll" }.createdAt)
+        // One denial against one confirmation: a tie, the report stays.
+        assertEquals(EffectiveStatus.ACTIVE, cache.resolveConflicts(votes, now = 2010L))
+    }
+
+    @Test
+    fun `votes from before the report or far in the future do not count`() {
+        val report = createReport("id1", createdAt = 1000L)
+        val votes = cache.admissible(report, listOf(
+            createConfirmation("old", "id1", ConfirmationStatus.NO_LONGER_THERE, 999L, pubkey = "a"),
+            createConfirmation("future", "id1", ConfirmationStatus.STILL_THERE, 5000L + 301, pubkey = "b"),
+            createConfirmation("ok", "id1", ConfirmationStatus.STILL_THERE, 5000L + 300, pubkey = "c")
+        ), now = 5000L)
+        assertEquals(listOf("ok"), votes.map { it.id })
+    }
+
+    @Test
+    fun `same-second denial and confirmation keep the report alive`() {
+        val report = createReport("id1", createdAt = 1000L)
+        val confs = listOf(
+            createConfirmation("c", "id1", ConfirmationStatus.STILL_THERE, 3000L, pubkey = "a"),
+            createConfirmation("d", "id1", ConfirmationStatus.NO_LONGER_THERE, 3000L, pubkey = "b")
+        )
+        assertEquals(3000L + EventType.POLICE.defaultTTL, cache.computeEffectiveExpiry(report, confs, now = 3000L))
+    }
+
+    @Test
+    fun `a report never outlives its expiration tag`() {
+        val report = createReport("id1", createdAt = 1000L, type = EventType.SPEED_CAMERA)
+            .copy(expiration = 1000L + 3600L)
+        assertEquals(1000L + 3600L, cache.computeEffectiveExpiry(report, emptyList()))
+    }
+
     private fun createReport(
         id: String,
         createdAt: Long = System.currentTimeMillis() / 1000,
@@ -193,11 +236,12 @@ class EventCacheTest {
         id: String,
         eventId: String,
         status: ConfirmationStatus,
-        createdAt: Long = System.currentTimeMillis() / 1000
+        createdAt: Long = System.currentTimeMillis() / 1000,
+        pubkey: String = "pubkey"
     ): Confirmation {
         return Confirmation(
             id = id,
-            pubkey = "pubkey",
+            pubkey = pubkey,
             eventId = eventId,
             status = status,
             createdAt = createdAt

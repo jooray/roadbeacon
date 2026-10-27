@@ -45,6 +45,89 @@ export function expirationFor(typeInfo, createdAt) {
   return createdAt + Math.max(RELAY_TTL, typeInfo.defaultTTL);
 }
 
+/** Votes more than this far in the future are ignored (nips/road-events.md). */
+export const MAX_FUTURE_SKEW = 300;
+
+const LATITUDE_SHAPE = /^-?[0-9]{1,2}\.[0-9]{6}$/;
+const LONGITUDE_SHAPE = /^-?[0-9]{1,3}\.[0-9]{6}$/;
+
+/** Degrees x 10^6, rounded (never truncated); null when not on Earth. */
+function toE6(degrees, limit) {
+  if (!Number.isFinite(degrees)) return null;
+  const e6 = Math.round(degrees * 1e6);
+  return Math.abs(e6) <= limit ? e6 : null;
+}
+
+/** `-?D+.DDDDDD` from an integer: the only spelling the format accepts (never `-0.000000`). */
+export function formatE6(e6) {
+  const magnitude = Math.abs(e6);
+  const sign = e6 < 0 ? '-' : '';
+  return `${sign}${Math.floor(magnitude / 1e6)}.${String(magnitude % 1e6).padStart(6, '0')}`;
+}
+
+/** The integer behind a coordinate tag, or null unless the text is exactly canonical. */
+function parseE6(text, shape, limit) {
+  if (typeof text !== 'string' || !shape.test(text)) return null;
+  const negative = text.startsWith('-');
+  const [whole, fraction] = (negative ? text.slice(1) : text).split('.');
+  const magnitude = Number(whole) * 1e6 + Number(fraction);
+  if (magnitude > limit) return null;
+  const e6 = negative ? -magnitude : magnitude;
+  return formatE6(e6) === text ? e6 : null;
+}
+
+/** Tags of a report in the shared layout, rebuilt from the integer position. */
+function reportTags(latE6, lonE6, typeInfo, expiration, maxspeed = null) {
+  const lat = latE6 / 1e6;
+  const lon = lonE6 / 1e6;
+  const tags = [
+    ['lat', formatE6(latE6)],
+    ['lon', formatE6(lonE6)],
+    ['g', geohashEncode(lat, lon, 4)],
+    ['g', geohashEncode(lat, lon, 5)],
+    ['g', geohashEncode(lat, lon, 6)],
+    ['t', typeInfo.string],
+    ['expiration', String(expiration)]
+  ];
+  if (maxspeed !== null) tags.push(['maxspeed', String(maxspeed)]);
+  return tags;
+}
+
+/**
+ * True when a kind 1315 event is in the current shared layout, exactly as the Android client and
+ * Roadstr check it: canonical coordinate text, matching geohashes, canonical numbers, known type.
+ */
+export function isCanonicalReport(event) {
+  if (event.kind !== 1315 || !Array.isArray(event.tags)) return false;
+  const tag = name => event.tags.find(t => t.length === 2 && t[0] === name);
+  const latE6 = parseE6(tag('lat')?.[1], LATITUDE_SHAPE, 90e6);
+  const lonE6 = parseE6(tag('lon')?.[1], LONGITUDE_SHAPE, 180e6);
+  const typeInfo = getTypeByString(tag('t')?.[1]);
+  const expText = tag('expiration')?.[1];
+  if (latE6 === null || lonE6 === null || !typeInfo || !/^(0|[1-9][0-9]*)$/.test(expText || '')) return false;
+  const expiration = Number(expText);
+  if (expiration > 0xFFFFFFFF) return false;
+  const speedText = tag('maxspeed')?.[1];
+  let maxspeed = null;
+  if (speedText !== undefined) {
+    if (!/^[1-9][0-9]*$/.test(speedText)) return false;
+    maxspeed = Number(speedText);
+    if (maxspeed < 5 || maxspeed > 300) return false;
+  }
+  return JSON.stringify(event.tags) === JSON.stringify(reportTags(latE6, lonE6, typeInfo, expiration, maxspeed));
+}
+
+/** True when a kind 1316 event is exactly `e, status` with an empty content. */
+export function isCanonicalVote(event) {
+  return event.kind === 1316 &&
+    event.content === '' &&
+    Array.isArray(event.tags) &&
+    event.tags.length === 2 &&
+    event.tags[0].length === 2 && event.tags[0][0] === 'e' && /^[0-9a-f]{64}$/.test(event.tags[0][1]) &&
+    event.tags[1].length === 2 && event.tags[1][0] === 'status' &&
+    (event.tags[1][1] === 'still_there' || event.tags[1][1] === 'no_longer_there');
+}
+
 /**
  * Create an unsigned kind 1315 road event report.
  */
@@ -53,28 +136,17 @@ export function createReportEvent(typeValue, lat, lon, content = '', createdAt =
   const typeInfo = getTypeByValue(typeValue);
   if (!typeInfo) throw new Error(`Unknown event type value: ${typeValue}`);
 
-  // Six decimals: the value a frame carries and prints back. Geohashes use the same text.
-  const latText = lat.toFixed(6);
-  const lonText = lon.toFixed(6);
-  const latRounded = parseFloat(latText);
-  const lonRounded = parseFloat(lonText);
-  const geohashes = [4, 5, 6].map(p => geohashEncode(latRounded, lonRounded, p));
-
-  const tags = [
-    ['lat', latText],
-    ['lon', lonText],
-    ['g', geohashes[0]],
-    ['g', geohashes[1]],
-    ['g', geohashes[2]],
-    ['t', typeInfo.string],
-    ['expiration', String(expirationFor(typeInfo, now))]
-  ];
+  // Six decimals from an integer: the value a frame carries and prints back. Geohashes use it too.
+  const latE6 = toE6(lat, 90e6);
+  const lonE6 = toE6(lon, 180e6);
+  if (latE6 === null || lonE6 === null) throw new Error(`Position out of range: ${lat}, ${lon}`);
 
   return {
     kind: 1315,
     created_at: now,
-    tags,
-    content: content || ''
+    tags: reportTags(latE6, lonE6, typeInfo, expirationFor(typeInfo, now)),
+    // Control characters would keep the report off the radio (it could not be framed).
+    content: (content || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
   };
 }
 
@@ -113,12 +185,7 @@ export function parseReportEvent(event) {
   const expTag = event.tags.find(t => t[0] === 'expiration');
 
   // Only the current shared layout: `lat, lon, g, g, g, t, expiration[, maxspeed]`, no alt.
-  const names = event.tags.map(t => t[0]);
-  if (event.tags.some(t => t[0] === 'alt')) return null;
-  if (names.slice(0, 6).join(',') !== 'lat,lon,g,g,g,t') return null;
-  if (names.length !== 7 && names.length !== 8) return null;
-
-  if (!typeTag || gTags.length === 0) return null;
+  if (!isCanonicalReport(event)) return null;
 
   const typeInfo = getTypeByString(typeTag[1]);
   if (!typeInfo) return null;
@@ -142,22 +209,51 @@ export function parseReportEvent(event) {
 }
 
 /**
+ * The votes that count (nips/road-events.md, "Display lifetime"): only canonical votes, one voice
+ * per key (its latest; on a tie "still there"), nothing older than the report or more than five
+ * minutes in the future.
+ */
+export function admissibleVotes(report, confirmations = [], now = null) {
+  const currentTime = now || Math.floor(Date.now() / 1000);
+  const latest = new Map();
+  for (const c of confirmations) {
+    if (!isCanonicalVote(c)) continue;
+    if (c.created_at < report.createdAt || c.created_at > currentTime + MAX_FUTURE_SKEW) continue;
+    const known = latest.get(c.pubkey);
+    const stillThere = c.tags[1][1] === 'still_there';
+    if (!known || c.created_at > known.created_at ||
+        (c.created_at === known.created_at && stillThere)) {
+      latest.set(c.pubkey, c);
+    }
+  }
+  return [...latest.values()];
+}
+
+/** More denials than confirmations in the last five minutes hides a report (a tie stays). */
+export function deniedByRecentMajority(votes, now = null) {
+  const currentTime = now || Math.floor(Date.now() / 1000);
+  const recent = votes.filter(c => currentTime - c.created_at < 300);
+  const confirmed = recent.filter(c => c.tags[1][1] === 'still_there').length;
+  return recent.length - confirmed > confirmed;
+}
+
+/**
  * Compute effective TTL expiry timestamp given confirmations/denials.
  * - still_there: extends expiry from confirmation time + defaultTTL
  * - no_longer_there: expires at confirmation time
  * Never later than the event's own `expiration`: a marker must not outlive the data.
  */
-export function computeEffectiveTTL(report, confirmations = []) {
+export function computeEffectiveTTL(report, confirmations = [], now = null) {
   const typeInfo = report.type || getTypeByString(report.typeString);
   if (!typeInfo) return report.createdAt + RELAY_TTL;
 
   const baseTTL = typeInfo.defaultTTL;
   let effectiveExpiry = report.createdAt + baseTTL;
 
-  // A vote cannot predate its report. Sort the rest by timestamp for deterministic processing.
-  const sorted = [...confirmations]
-    .filter(c => c.created_at >= report.createdAt)
-    .sort((a, b) => a.created_at - b.created_at);
+  // Same timestamp: the denial first, so a tie keeps the report alive.
+  const rank = c => (c.tags[1][1] === 'still_there' ? 1 : 0);
+  const sorted = admissibleVotes(report, confirmations, now)
+    .sort((a, b) => a.created_at - b.created_at || rank(a) - rank(b));
 
   for (const c of sorted) {
     const statusTag = c.tags.find(t => t[0] === 'status');
@@ -182,6 +278,6 @@ export function computeEffectiveTTL(report, confirmations = []) {
  */
 export function isExpired(report, confirmations = [], now = null) {
   const currentTime = now || Math.floor(Date.now() / 1000);
-  const expiry = computeEffectiveTTL(report, confirmations);
-  return currentTime >= expiry;
+  if (currentTime >= computeEffectiveTTL(report, confirmations, currentTime)) return true;
+  return deniedByRecentMajority(admissibleVotes(report, confirmations, currentTime), currentTime);
 }
