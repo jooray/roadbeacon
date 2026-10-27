@@ -98,6 +98,7 @@ class MeshBridge(
             entry.seenRadio = true
         }
 
+        settings.meshSince = maxOf(settings.meshSince, System.currentTimeMillis())
         onInbound(event)
 
         // If this was a report, apply votes that were waiting for it.

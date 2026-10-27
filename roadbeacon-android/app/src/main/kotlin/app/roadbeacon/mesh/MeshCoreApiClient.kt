@@ -307,6 +307,10 @@ class MeshCoreApiClient(
             put("dataTypes", kotlinx.serialization.json.buildJsonArray {
                 add(JsonPrimitive(dataType))
             })
+            // Ask for what was heard while this app was not connected.
+            if (settings.meshSince > 0) {
+                put("since", java.time.Instant.ofEpochMilli(settings.meshSince).toString())
+            }
         }
     }.toString()
 

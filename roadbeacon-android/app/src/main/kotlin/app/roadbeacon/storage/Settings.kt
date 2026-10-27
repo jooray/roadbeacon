@@ -100,6 +100,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_MESH_BRIDGE_TO_RADIO, false)
         set(value) = prefs.edit().putBoolean(KEY_MESH_BRIDGE_TO_RADIO, value).apply()
 
+    /** Last time this app processed a radio datagram, so a reconnect can replay what it missed. */
+    var meshSince: Long
+        get() = prefs.getLong(KEY_MESH_SINCE, 0L)
+        set(value) = prefs.edit().putLong(KEY_MESH_SINCE, value).apply()
+
     companion object {
         private const val TAG = "Settings"
         private const val PREFS_NAME = "roadbeacon_prefs"
@@ -121,6 +126,7 @@ class Settings(context: Context) {
         private const val KEY_MESH_RECEIVE = "mesh_receive"
         private const val KEY_MESH_BRIDGE_TO_NOSTR = "mesh_bridge_to_nostr"
         private const val KEY_MESH_BRIDGE_TO_RADIO = "mesh_bridge_to_radio"
+        private const val KEY_MESH_SINCE = "mesh_since"
 
         const val DEFAULT_MESH_URL = "ws://127.0.0.1:8787/api/v1"
 
