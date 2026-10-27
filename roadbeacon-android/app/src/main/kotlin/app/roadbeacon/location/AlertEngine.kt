@@ -1,5 +1,6 @@
 package app.roadbeacon.location
 
+import app.roadbeacon.R
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -115,7 +116,8 @@ class AlertEngine(
 
     private fun showNotification(event: RoadEvent, distance: Double) {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.drawable.ic_stat_roadbeacon)
+            .setColor(0xFF474DD3.toInt())
             .setContentTitle("${event.type.displayName} ahead")
             .setContentText("${UnitFormatter.formatDistanceMeters(distance, settings.unitSystem)} away")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
