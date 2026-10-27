@@ -332,7 +332,9 @@ protocol), with:
 
 Rate limits, de-duplication and bridge consent are part of any implementation's obligations: a
 report is 117–165 bytes, roughly 0.6–0.9 s of airtime at SF9/125 kHz, so a misbehaving bridge is a
-channel-wide problem.
+channel-wide problem. The operational details — topology, the `#roadstr` channel, `0xFF52`, the
+one-BLE-owner local API and the bridge limits — are in
+[`docs/meshcore.md`](../docs/meshcore.md).
 
 ## Kind Allocation
 

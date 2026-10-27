@@ -125,7 +125,9 @@ See `nips/road-events.md` for the specification. The format is called **Road Eve
 
 ## Documentation
 
-- `docs/ecosystem.md` — the two apps, compatibility, and the path forward (frames, MeshCore, v2)
+- `docs/ecosystem.md` — the two apps, compatibility, and the path forward
+- `docs/meshcore.md` — the MeshCore transport: channel, data type, bridging, local API, validation status
+- `docs/android-auto.md` — plan for Roadstr on Android Auto (separate branch)
 - `SPECIFICATION.md` — Complete technical specification
 - `nips/road-events.md` — Draft NIP for kinds 1315/1316 (ready for submission to nostr-protocol/nips)
 - `reference/osmand-aidl.md` — OsmAnd plugin API documentation
