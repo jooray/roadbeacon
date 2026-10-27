@@ -1,0 +1,17 @@
+{
+  "version": "0.5.0",
+  "files": [
+    "index.html",
+    "css/style.css",
+    "js/app.js",
+    "js/auth.js",
+    "js/config.js",
+    "js/geohash.js",
+    "js/map.js",
+    "js/nostr.js",
+    "js/roadbeacon.js",
+    "js/update.js",
+    "js/version.js",
+    "manifest.webmanifest"
+  ]
+}
