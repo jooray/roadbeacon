@@ -1,10 +1,12 @@
 package app.roadbeacon.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.preference.*
 import app.roadbeacon.RoadbeaconApplication
+import app.roadbeacon.RoadbeaconService
 import app.roadbeacon.mesh.MeshApiState
 import app.roadbeacon.model.EventType
 import app.roadbeacon.util.UnitFormatter
@@ -201,10 +203,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         val meshEnabled = SwitchPreferenceCompat(context).apply {
             title = "Use MeshCore radio"
-            summary = "Restart the service after changing this"
+            summary = "Applies immediately while the service is running"
             isChecked = app.settings.meshEnabled
             setOnPreferenceChangeListener { _, newValue ->
                 app.settings.meshEnabled = newValue as Boolean
+                if (app.nostrClient != null) {
+                    requireContext().startService(
+                        Intent(requireContext(), RoadbeaconService::class.java)
+                            .setAction(RoadbeaconService.ACTION_APPLY_MESH)
+                    )
+                }
                 true
             }
         }

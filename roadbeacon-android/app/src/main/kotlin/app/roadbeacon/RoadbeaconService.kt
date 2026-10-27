@@ -49,6 +49,7 @@ class RoadbeaconService : Service() {
 
         const val ACTION_START = "app.roadbeacon.action.START"
         const val ACTION_STOP = "app.roadbeacon.action.STOP"
+        const val ACTION_APPLY_MESH = "app.roadbeacon.action.APPLY_MESH"
     }
 
     override fun onCreate() {
@@ -67,25 +68,7 @@ class RoadbeaconService : Service() {
         app.mapLayerManager = mapLayerManager
         widgetManager = WidgetManager(this, osmandHelper, nostrClient, app.keyStore, eventCache)
 
-        if (app.settings.meshEnabled) {
-            val client = MeshCoreApiClient(app.settings, serviceScope)
-            val bridge = MeshBridge(
-                settings = app.settings,
-                api = client,
-                scope = serviceScope,
-                onInbound = { event ->
-                    when (event.kind) {
-                        1315 -> handleReportEvent(event)
-                        1316 -> handleConfirmationEvent(event)
-                    }
-                },
-                publishToRelays = { event -> nostrClient.publish(event) }
-            )
-            app.meshClient = client
-            app.meshBridge = bridge
-            bridge.start()
-            Log.i(TAG, "MeshCore bridge started: ${app.settings.meshUrl}")
-        }
+        applyMeshSettings()
 
         startForeground(NOTIFICATION_ID, createNotification())
     }
@@ -93,6 +76,7 @@ class RoadbeaconService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopSelf()
+            ACTION_APPLY_MESH -> applyMeshSettings()
             else -> {
                 if (!monitoring) {
                     startMonitoring()
@@ -103,6 +87,40 @@ class RoadbeaconService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** Starts, stops or restarts the mesh bridge from the current settings, without a restart. */
+    private fun applyMeshSettings() {
+        val app = application as RoadbeaconApplication
+        val enabled = app.settings.meshEnabled
+        if (!enabled) {
+            app.meshBridge?.stop()
+            app.meshBridge = null
+            app.meshClient = null
+            return
+        }
+        if (app.meshBridge != null) return
+        val client = MeshCoreApiClient(app.settings, serviceScope)
+        val bridge = MeshBridge(
+            settings = app.settings,
+            api = client,
+            scope = serviceScope,
+            onInbound = { event ->
+                when (event.kind) {
+                    1315 -> handleReportEvent(event)
+                    1316 -> handleConfirmationEvent(event)
+                }
+            },
+            publishToRelays = { event -> nostrClient.publish(event) },
+            position = {
+                locationMonitor.getLastLocation()?.let { it.lat to it.lon }
+            },
+            reportExists = { id -> eventCache.getReport(id) != null }
+        )
+        app.meshClient = client
+        app.meshBridge = bridge
+        bridge.start()
+        Log.i(TAG, "MeshCore bridge started: ${app.settings.meshUrl}")
+    }
 
     override fun onDestroy() {
         (application as RoadbeaconApplication).meshBridge?.stop()

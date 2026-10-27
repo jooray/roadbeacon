@@ -27,7 +27,11 @@ class MeshBridge(
     private val api: MeshCoreApiClient,
     private val scope: CoroutineScope,
     private val onInbound: (NostrEvent) -> Unit,
-    private val publishToRelays: (NostrEvent) -> Unit
+    private val publishToRelays: (NostrEvent) -> Unit,
+    /** Driver position, for the area check on relay -> radio. */
+    private val position: () -> Pair<Double, Double>? = { null },
+    /** True when the report is already in the local cache. */
+    private val reportExists: (String) -> Boolean = { false }
 ) {
     private data class LedgerEntry(
         var seenRadio: Boolean = false,
@@ -40,6 +44,14 @@ class MeshBridge(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LedgerEntry>?) =
             size > MAX_LEDGER
     }
+
+    private data class ParkedVote(val at: Long, val event: NostrEvent)
+
+    private val parked = object : LinkedHashMap<String, MutableList<ParkedVote>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MutableList<ParkedVote>>?) =
+            size > MAX_PARKED_REPORTS
+    }
+    private var parkedCount = 0
 
     private var collectJob: Job? = null
     private val ownSends = ArrayDeque<Long>()
@@ -69,6 +81,16 @@ class MeshBridge(
             return
         }
         if (isExpired(event)) return
+        dropStaleParkedVotes()
+
+        // A vote can arrive before its report; hold it briefly and apply it when the report lands.
+        if (event.kind == 1316) {
+            val target = event.tags.firstOrNull { it.size == 2 && it[0] == "e" }?.getOrNull(1)
+            if (target != null && !reportExists(target)) {
+                park(target, event)
+                return
+            }
+        }
 
         synchronized(lock) {
             val entry = ledger.getOrPut(event.id) { LedgerEntry() }
@@ -77,8 +99,49 @@ class MeshBridge(
         }
 
         onInbound(event)
+
+        // If this was a report, apply votes that were waiting for it.
+        if (event.kind == 1315) {
+            takeParked(event.id).forEach { vote ->
+                synchronized(lock) {
+                    val entry = ledger.getOrPut(vote.id) { LedgerEntry() }
+                    if (entry.seenRadio) return@forEach
+                    entry.seenRadio = true
+                }
+                onInbound(vote)
+            }
+        }
+
         if (settings.meshBridgeToNostr) {
             publishToRelays(event)
+        }
+    }
+
+    private fun park(reportId: String, vote: NostrEvent) {
+        synchronized(lock) {
+            if (parkedCount >= MAX_PARKED_VOTES) return
+            val list = parked.getOrPut(reportId) { mutableListOf() }
+            list.add(ParkedVote(System.currentTimeMillis(), vote))
+            parkedCount++
+        }
+    }
+
+    private fun takeParked(reportId: String): List<NostrEvent> = synchronized(lock) {
+        val list = parked.remove(reportId).orEmpty()
+        parkedCount -= list.size
+        list.map { it.event }
+    }
+
+    private fun dropStaleParkedVotes() {
+        val cutoff = System.currentTimeMillis() - PARKED_TTL_MS
+        synchronized(lock) {
+            val iterator = parked.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                entry.value.removeAll { it.at < cutoff }
+                if (entry.value.isEmpty()) iterator.remove()
+            }
+            parkedCount = parked.values.sumOf { it.size }
         }
     }
 
@@ -110,6 +173,10 @@ class MeshBridge(
             if (entry.sentRadio || entry.seenRadio) return
         }
         val frame = encode(event) ?: return
+        // Relay -> radio is limited to what is near the driver; without a fix, skip.
+        val here = position() ?: return
+        val where = eventLocation(event) ?: return
+        if (distanceMeters(here, where) > RELAY_RADIUS_METERS) return
         val now = System.currentTimeMillis()
         if (now - lastRelaySendAt < RELAY_GAP_MS) return
         if (!allow(relaySends, RELAY_PER_HOUR, 3_600_000)) return
@@ -145,11 +212,34 @@ class MeshBridge(
         return true
     }
 
+    private fun eventLocation(event: NostrEvent): Pair<Double, Double>? {
+        val lat = event.tags.firstOrNull { it.size == 2 && it[0] == "lat" }?.getOrNull(1)
+            ?.toDoubleOrNull() ?: return null
+        val lon = event.tags.firstOrNull { it.size == 2 && it[0] == "lon" }?.getOrNull(1)
+            ?.toDoubleOrNull() ?: return null
+        return lat to lon
+    }
+
+    private fun distanceMeters(a: Pair<Double, Double>, b: Pair<Double, Double>): Double {
+        val earth = 6_371_000.0
+        val dLat = Math.toRadians(b.first - a.first)
+        val dLon = Math.toRadians(b.second - a.second)
+        val lat1 = Math.toRadians(a.first)
+        val lat2 = Math.toRadians(b.first)
+        val h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        return 2 * earth * Math.asin(Math.sqrt(h))
+    }
+
     companion object {
         private const val TAG = "MeshBridge"
         private const val MAX_LEDGER = 2048
         private const val OWN_PER_MINUTE = 6
         private const val RELAY_PER_HOUR = 20
         private const val RELAY_GAP_MS = 20_000L
+        private const val RELAY_RADIUS_METERS = 40_000.0
+        private const val MAX_PARKED_VOTES = 64
+        private const val MAX_PARKED_REPORTS = 32
+        private const val PARKED_TTL_MS = 15 * 60 * 1000L
     }
 }
