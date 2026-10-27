@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadbeacon: decentralized road event reports</title>
+<meta name="description" content="Roadbeacon is a decentralized road event reporting system. Drivers report and see police, accidents, construction and hazards as signed Nostr events shared over relays. Public domain.">
+<meta name="theme-color" content="#474DD3">
+<link rel="canonical" href="https://jooray.github.io/roadbeacon/">
+<meta property="og:title" content="Roadbeacon">
+<meta property="og:description" content="Waze without the centralized tracking: road events as signed Nostr events shared over relays.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jooray.github.io/roadbeacon/">
+<meta property="og:image" content="https://jooray.github.io/roadbeacon/img/icon-512.png">
+<meta name="twitter:card" content="summary">
+<link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<style>
+:root{--bg:#fff;--fg:#1a1b2e;--muted:#555a72;--card:#f3f4fc;--line:#d9dbf0;--accent:#474DD3;--accent-fg:#fff;--link:#3a40c0}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0e1c;--fg:#e8e9f7;--muted:#a3a7c4;--card:#171933;--line:#2a2d55;--accent:#6366F1;--accent-fg:#fff;--link:#9ea1ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.skip{position:absolute;left:-999px;top:0;background:var(--accent);color:var(--accent-fg);padding:.5rem 1rem}
+.skip:focus{left:0;z-index:10}
+.wrap{max-width:46rem;margin:0 auto;padding:0 1rem}
+header.hero{padding:2.5rem 0 1.5rem}
+.hero img.logo{width:96px;height:96px;border-radius:22px;display:block}
+h1{font-size:2.2rem;line-height:1.15;margin:1rem 0 .5rem}
+h2{font-size:1.4rem;margin:2.5rem 0 .75rem}
+.lead{font-size:1.15rem;color:var(--muted);margin:0 0 1.25rem}
+.btns{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.25rem 0}
+.btn{display:inline-block;padding:.7rem 1.1rem;border-radius:.6rem;background:var(--accent);color:var(--accent-fg);text-decoration:none;font-weight:600}
+.btn.alt{background:transparent;color:var(--link);border:2px solid var(--accent)}
+ol.steps{padding-left:1.25rem}
+ol.steps li{margin:.6rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.75rem;padding:1rem 1.25rem}
+.card ul{margin:.25rem 0;padding-left:1.2rem}
+figure{margin:1.5rem 0}
+figure img{max-width:100%;height:auto;border-radius:.6rem;border:1px solid var(--line);display:block}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:.4rem}
+code{font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="hero"><div class="wrap">
+  <img class="logo" src="img/icon-512.png" width="96" height="96" alt="Roadbeacon icon: a white road warning triangle on indigo">
+  <h1>Roadbeacon</h1>
+  <p class="lead">A decentralized road event reporting system, Waze without the centralized tracking. Drivers report and see police, accidents, construction and hazards as signed Nostr events shared over relays. There is no central authority.</p>
+  <div class="btns">
+    <a class="btn" href="https://cypherpunk.today/static/roadbeacon/">Open the web app</a>
+    <a class="btn alt" href="https://zapstore.dev/apps/app.roadbeacon">Android on Zapstore</a>
+  </div>
+</div></header>
+<main id="main" class="wrap">
+
+<section aria-labelledby="how">
+  <h2 id="how">How it works</h2>
+  <ol class="steps">
+    <li><strong>Report.</strong> A driver picks a category (police, accident, road closure, construction, hazard and others). The app builds a Nostr event with the position, a geohash and an expiry time, and signs it with the driver's key. The key can be a persistent identity or an ephemeral one.</li>
+    <li><strong>Share.</strong> The signed event is published to Nostr relays. It can also travel as a compact binary message over MeshCore mesh networks.</li>
+    <li><strong>See and confirm.</strong> Other drivers query relays by geohash and see the reports as markers on the map. They can confirm "still there" or deny "no longer there". Reports expire by type, for example after 1 hour for traffic jams and 30 days for speed cameras.</li>
+  </ol>
+  <figure>
+    <img src="img/screenshot-web.png" width="1299" height="629" alt="Roadbeacon web app: a map with report markers and a popup with Still there and Gone buttons" loading="lazy">
+    <figcaption>The web app.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/screenshot-android.png" width="1080" height="1096" alt="Roadbeacon Android app next to OsmAnd showing events and a Report button" loading="lazy">
+    <figcaption>The Android app (left) and its OsmAnd integration with the Report button (right).</figcaption>
+  </figure>
+</section>
+
+<section aria-labelledby="get">
+  <h2 id="get">Get it</h2>
+  <div class="card"><ul>
+    <li>Web app: <a href="https://cypherpunk.today/static/roadbeacon/">cypherpunk.today/static/roadbeacon</a></li>
+    <li>Android app (an OsmAnd plugin): <a href="https://zapstore.dev/apps/app.roadbeacon">Zapstore</a>, or the APK from <a href="https://github.com/jooray/roadbeacon/releases">GitHub releases</a>. With Obtainium: <a href="obtainium://add/https://github.com/jooray/roadbeacon">add Roadbeacon</a>. OsmAnd must be installed to view events.</li>
+    <li>Source code: <a href="https://github.com/jooray/roadbeacon">github.com/jooray/roadbeacon</a>. Public domain (<a href="https://unlicense.org/">Unlicense</a>).</li>
+  </ul></div>
+</section>
+
+<section aria-labelledby="nostr">
+  <h2 id="nostr">Follow on Nostr</h2>
+  <div class="card"><ul>
+    <li><a href="nostr:npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">Open in your Nostr app</a></li>
+    <li><a href="https://njump.me/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">njump.me</a></li>
+    <li><a href="https://primal.net/p/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">Primal</a></li>
+    <li><a href="https://yakihonne.com/users/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">YakiHonne</a></li>
+    <li>NIP-05: <code>roadbeacon@cypherpunk.today</code></li>
+    <li>Zap address: <code>roadbeacon@pay.cypherpunk.today</code></li>
+  </ul>
+  <p><code>npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h</code></p></div>
+</section>
+
+<section aria-labelledby="name">
+  <h2 id="name">About the name</h2>
+  <p>Roadbeacon was called Roadstr until version 0.4. It was renamed to avoid confusion with the <a href="https://github.com/roadstrapp/roadstr-app">Roadstr navigation app</a>, which is an independent project by a different author. The two are not affiliated and not interchangeable. They share the road event format (Nostr kinds 1315 and 1316), so each can display the other's reports.</p>
+</section>
+</main>
+<footer><div class="wrap">
+  <p>Roadbeacon by Juraj Bednár. More of my projects: <a href="https://juraj.bednar.io/showcase/">project showcase</a>.</p>
+</div></footer>
+</body>
+</html>
