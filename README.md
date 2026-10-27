@@ -4,6 +4,8 @@
 
 **A decentralized road event reporting system — "Waze without the centralized tracking"**
 
+**Website:** [jooray.github.io/roadbeacon](https://jooray.github.io/roadbeacon/) (source in [`site/`](site/), deployed by GitHub Pages)
+
 <!-- jooray-links:start -->
 ### More from me
 
