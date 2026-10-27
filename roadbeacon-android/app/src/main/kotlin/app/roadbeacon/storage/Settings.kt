@@ -9,8 +9,9 @@ import app.roadbeacon.util.UnitSystem
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import app.roadbeacon.mesh.MeshBridgeConfig
 
-class Settings(context: Context) {
+class Settings(context: Context) : MeshBridgeConfig {
 
     private val prefs: SharedPreferences = createEncryptedPrefs(context)
 
@@ -71,7 +72,7 @@ class Settings(context: Context) {
     // ── MeshCore local API ───────────────────────────────────────────────────────────────────────
 
     /** Master switch: connect to MeshCore Open's local API and bridge road events. */
-    var meshEnabled: Boolean
+    override var meshEnabled: Boolean
         get() = prefs.getBoolean(KEY_MESH_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_MESH_ENABLED, value).apply()
 
@@ -84,26 +85,29 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_MESH_IDENTITY, null)
         set(value) = prefs.edit().putString(KEY_MESH_IDENTITY, value).apply()
 
-    var meshSendOwn: Boolean
+    override var meshSendOwn: Boolean
         get() = prefs.getBoolean(KEY_MESH_SEND_OWN, true)
         set(value) = prefs.edit().putBoolean(KEY_MESH_SEND_OWN, value).apply()
 
-    var meshReceive: Boolean
+    override var meshReceive: Boolean
         get() = prefs.getBoolean(KEY_MESH_RECEIVE, true)
         set(value) = prefs.edit().putBoolean(KEY_MESH_RECEIVE, value).apply()
 
-    var meshBridgeToNostr: Boolean
+    override var meshBridgeToNostr: Boolean
         get() = prefs.getBoolean(KEY_MESH_BRIDGE_TO_NOSTR, false)
         set(value) = prefs.edit().putBoolean(KEY_MESH_BRIDGE_TO_NOSTR, value).apply()
 
-    var meshBridgeToRadio: Boolean
+    override var meshBridgeToRadio: Boolean
         get() = prefs.getBoolean(KEY_MESH_BRIDGE_TO_RADIO, false)
         set(value) = prefs.edit().putBoolean(KEY_MESH_BRIDGE_TO_RADIO, value).apply()
 
-    /** Last time this app processed a radio datagram, so a reconnect can replay what it missed. */
-    var meshSince: Long
-        get() = prefs.getLong(KEY_MESH_SINCE, 0L)
-        set(value) = prefs.edit().putLong(KEY_MESH_SINCE, value).apply()
+    /**
+     * MeshCore Open's receive time (ISO-8601) of the last radio datagram this app processed, sent
+     * back as `since` so a reconnect replays what it missed. The server's clock, not ours.
+     */
+    override var meshCursor: String?
+        get() = prefs.getString(KEY_MESH_CURSOR, null)
+        set(value) = prefs.edit().putString(KEY_MESH_CURSOR, value).apply()
 
     companion object {
         private const val TAG = "Settings"
@@ -126,7 +130,7 @@ class Settings(context: Context) {
         private const val KEY_MESH_RECEIVE = "mesh_receive"
         private const val KEY_MESH_BRIDGE_TO_NOSTR = "mesh_bridge_to_nostr"
         private const val KEY_MESH_BRIDGE_TO_RADIO = "mesh_bridge_to_radio"
-        private const val KEY_MESH_SINCE = "mesh_since"
+        private const val KEY_MESH_CURSOR = "mesh_cursor"
 
         const val DEFAULT_MESH_URL = "ws://127.0.0.1:8787/api/v1"
 

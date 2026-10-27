@@ -4,13 +4,16 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
 import app.roadbeacon.RoadbeaconApplication
 import app.roadbeacon.RoadbeaconService
 import app.roadbeacon.mesh.MeshApiState
+import app.roadbeacon.mesh.MeshCoreApiClient
 import app.roadbeacon.model.EventType
 import app.roadbeacon.util.UnitFormatter
 import app.roadbeacon.util.UnitSystem
+import kotlinx.coroutines.launch
 
 class SettingsFragment : PreferenceFragmentCompat() {
 
@@ -193,6 +196,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
                         "Connected to ${state.deviceName ?: "radio"}"
                     is MeshApiState.WaitingForApproval ->
                         "Waiting for approval in MeshCore Open"
+                    MeshApiState.NotApproved ->
+                        "Not approved in MeshCore Open (allow Roadbeacon there; retrying every 2 min)"
                     is MeshApiState.Failed -> state.message
                     MeshApiState.Connecting -> "Connecting…"
                     MeshApiState.Disconnected -> "Off"
@@ -218,14 +223,46 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         meshCategory.addPreference(meshEnabled)
 
+        // What MeshCore Open's "Allow Roadbeacon?" dialog must show; the app name there is
+        // self-declared, the fingerprint is not.
+        val meshFingerprint = Preference(context).apply {
+            title = "Pairing fingerprint"
+            summary = "…"
+        }
+        meshCategory.addPreference(meshFingerprint)
+        viewLifecycleOwnerLiveData.observe(this) { owner ->
+            owner?.lifecycleScope?.launch {
+                val client = app.meshClient ?: MeshCoreApiClient(app.settings, this)
+                meshFingerprint.summary = "${client.fingerprint()} — compare with MeshCore Open's dialog"
+            }
+        }
+
         val meshUrl = EditTextPreference(context).apply {
             title = "MeshCore Open API"
             summary = app.settings.meshUrl
             text = app.settings.meshUrl
             dialogTitle = "ws://127.0.0.1:8787/api/v1"
             setOnPreferenceChangeListener { pref, newValue ->
-                app.settings.meshUrl = newValue as String
-                (pref as EditTextPreference).summary = newValue
+                val url = (newValue as String).trim()
+                // The API is loopback-only; anything else would send the pairing proof elsewhere.
+                val host = runCatching { java.net.URI(url) }.getOrNull()
+                    ?.takeIf { it.scheme == "ws" }?.host
+                if (host != "127.0.0.1" && host != "localhost") {
+                    android.widget.Toast.makeText(
+                        requireContext(),
+                        "Only ws://127.0.0.1:<port>/… is allowed",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnPreferenceChangeListener false
+                }
+                app.settings.meshUrl = url
+                (pref as EditTextPreference).summary = url
+                if (app.nostrClient != null) {
+                    requireContext().startService(
+                        Intent(requireContext(), RoadbeaconService::class.java)
+                            .setAction(RoadbeaconService.ACTION_APPLY_MESH)
+                    )
+                }
                 true
             }
         }

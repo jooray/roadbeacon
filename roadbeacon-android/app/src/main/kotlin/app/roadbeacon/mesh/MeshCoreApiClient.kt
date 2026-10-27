@@ -2,7 +2,9 @@ package app.roadbeacon.mesh
 
 import android.util.Base64
 import android.util.Log
+import app.roadbeacon.BuildConfig
 import app.roadbeacon.storage.Settings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,11 +17,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -35,24 +38,29 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECPoint
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.pow
 
-data class MeshDatagram(val payload: ByteArray, val snrDb: Double)
+/** One channel datagram; [receivedAt] is MeshCore Open's receive time, the replay cursor. */
+data class MeshDatagram(val payload: ByteArray, val snrDb: Double, val receivedAt: String?)
 
 sealed interface MeshApiState {
     data object Disconnected : MeshApiState
     data object Connecting : MeshApiState
     /** The user has to approve this app in MeshCore Open. */
     data object WaitingForApproval : MeshApiState
+    /** MeshCore Open refused or revoked this app; retried slowly. */
+    data object NotApproved : MeshApiState
     data class Connected(val deviceName: String?) : MeshApiState
     data class Failed(val message: String) : MeshApiState
 }
@@ -61,8 +69,11 @@ sealed interface MeshApiState {
  * Client for MeshCore Open's local API (`documentation/LOCAL_API.md` there).
  *
  * Pairing: this app owns a P-256 key. The first time it connects, MeshCore Open
- * shows "Allow Roadbeacon …?"; the approved key is stored on both sides, so
- * later connections only prove possession of the key. No shared secret.
+ * shows "Allow Roadbeacon …?" with the key's [fingerprint]; the approved key is
+ * stored on both sides, so later connections only prove possession of the key.
+ * No shared secret. The client builds the string it signs from the nonce itself
+ * and signs once per connection, so it is never a signing oracle for whatever
+ * listens on the port.
  */
 class MeshCoreApiClient(
     private val settings: Settings,
@@ -70,8 +81,8 @@ class MeshCoreApiClient(
     private val channelName: String = "#roadstr",
     private val dataType: Int = 0xFF52,
     private val clientName: String = "Roadbeacon",
-    private val clientVersion: String = "0.4.0"
-) {
+    private val clientVersion: String = BuildConfig.VERSION_NAME
+) : MeshTransport {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val http by lazy {
         OkHttpClient.Builder()
@@ -83,111 +94,166 @@ class MeshCoreApiClient(
     private val _state = MutableStateFlow<MeshApiState>(MeshApiState.Disconnected)
     val state: StateFlow<MeshApiState> = _state.asStateFlow()
 
-    private val _datagrams = MutableSharedFlow<MeshDatagram>(extraBufferCapacity = 64)
-    val datagrams: SharedFlow<MeshDatagram> = _datagrams.asSharedFlow()
+    private val _connected = MutableStateFlow(false)
+    override val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
-    private var socket: WebSocket? = null
+    // emit() suspends when full, so a replay burst slows the reader instead of being dropped.
+    private val _datagrams = MutableSharedFlow<MeshDatagram>(extraBufferCapacity = 256)
+    override val datagrams: SharedFlow<MeshDatagram> = _datagrams.asSharedFlow()
+
+    @Volatile private var socket: WebSocket? = null
+    @Volatile private var stopped = true
+    @Volatile private var generation = 0
     private var loop: Job? = null
-    private var stopped = true
     private var attempts = 0
     private val requestIds = AtomicLong(0)
     private val pending = ConcurrentHashMap<Long, Channel<JsonObject>>()
-    private val authenticated = Channel<Boolean>(Channel.CONFLATED)
 
     private var privateKey: java.security.PrivateKey? = null
     private var publicKeyRaw: ByteArray? = null
 
-    fun start() {
+    override fun start() {
         if (!stopped) return
         stopped = false
         loop = scope.launch { connectLoop() }
     }
 
-    fun stop() {
+    override fun stop() {
         stopped = true
+        generation++
         loop?.cancel()
         loop = null
         socket?.close(1000, "app stopping")
         socket = null
         pending.values.forEach { it.close() }
         pending.clear()
-        _state.value = MeshApiState.Disconnected
+        setState(MeshApiState.Disconnected)
+    }
+
+    /** What MeshCore Open shows in its "Allow …?" dialog for this app, e.g. `AB12 CD34 EF56 7890`. */
+    suspend fun fingerprint(): String {
+        ensureIdentity()
+        val digest = MessageDigest.getInstance("SHA-256").digest(publicKeyRaw!!)
+        val hex = digest.copyOf(8).joinToString("") { "%02X".format(Locale.ROOT, it) }
+        return hex.chunked(4).joinToString(" ")
     }
 
     private suspend fun connectLoop() {
         while (!stopped) {
+            var refused = false
             try {
-                _state.value = MeshApiState.Connecting
-                connectOnce()
-                // connectOnce returns when the socket closes
+                setState(MeshApiState.Connecting)
+                refused = connectOnce()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "mesh API connection failed: ${e.message}")
-                _state.value = MeshApiState.Failed(e.message ?: "connection failed")
+                if (!stopped) setState(MeshApiState.Failed(e.message ?: "connection failed"))
             }
             if (stopped) break
-            attempts++
-            val wait = (5_000L * 2.0.pow(attempts.coerceAtMost(4))).toLong().coerceAtMost(60_000L)
+            val wait = if (refused) {
+                setState(MeshApiState.NotApproved)
+                REFUSED_RETRY_MS
+            } else {
+                attempts++
+                (5_000L * 2.0.pow(attempts.coerceAtMost(4))).toLong().coerceAtMost(60_000L)
+            }
             delay(wait)
         }
     }
 
-    private suspend fun connectOnce() {
+    /** Runs one connection to its end. True when MeshCore Open refused this app (close 4003). */
+    private suspend fun connectOnce(): Boolean {
         ensureIdentity()
+        val connection = ++generation
         val request = Request.Builder().url(settings.meshUrl).build()
-        val closed = Channel<Unit>(Channel.CONFLATED)
+        val inbox = Channel<String>(INBOX_CAPACITY)
+        var closeCode = 0
+        var signed = false
         val ws = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                attempts = 0
                 webSocket.send(helloMessage())
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                scope.launch { handleMessage(webSocket, text) }
+                if (inbox.trySend(text).isFailure) {
+                    // The API sends far less than this; a reader this far behind is broken.
+                    webSocket.close(1008, "client overloaded")
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                closeCode = code
+                webSocket.close(1000, null)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "mesh API socket failure: ${t.message}")
-                closed.trySend(Unit)
+                inbox.close()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                closed.trySend(Unit)
+                closeCode = code
+                inbox.close()
             }
         })
         socket = ws
-        closed.receive()
-        ws.cancel()
-        socket = null
-        _state.value = MeshApiState.Disconnected
+        try {
+            // One reader, in arrival order: replayed frames keep their order and the cursor only
+            // moves forward.
+            for (text in inbox) {
+                if (connection != generation) break
+                val message = try {
+                    json.parseToJsonElement(text).jsonObject
+                } catch (e: Exception) {
+                    Log.w(TAG, "mesh API sent invalid JSON")
+                    continue
+                }
+                if (message["type"]?.jsonPrimitive?.contentOrNull == "pairing.challenge") {
+                    if (!signed) {
+                        signed = true
+                        answerChallenge(ws, message)
+                    }
+                    continue
+                }
+                handleMessage(message)
+            }
+        } finally {
+            ws.cancel()
+            if (socket === ws) socket = null
+            pending.values.forEach { it.close() }
+            pending.clear()
+        }
+        if (connection == generation && !stopped) setState(MeshApiState.Disconnected)
+        return closeCode == CLOSE_REFUSED
     }
 
-    private suspend fun handleMessage(ws: WebSocket, text: String) {
-        val message = try {
-            json.parseToJsonElement(text).jsonObject
-        } catch (e: Exception) {
-            Log.w(TAG, "mesh API sent invalid JSON")
+    private fun answerChallenge(ws: WebSocket, message: JsonObject) {
+        val nonce = message["nonce"]?.jsonPrimitive?.contentOrNull
+        if (nonce == null || !NONCE_SHAPE.matches(nonce)) {
+            Log.w(TAG, "mesh API sent a malformed pairing challenge")
+            ws.close(1002, "bad challenge")
             return
         }
-        when (message["type"]?.jsonPrimitive?.contentOrNull) {
-            "pairing.challenge" -> {
-                _state.value = MeshApiState.WaitingForApproval
-                val signed = message["message"]?.jsonPrimitive?.contentOrNull
-                if (signed != null) {
-                    ws.send(
-                        buildJsonObject {
-                            put("type", "pair")
-                            put("signature", sign(signed))
-                        }.toString()
-                    )
-                }
-            }
+        setState(MeshApiState.WaitingForApproval)
+        ws.send(
+            buildJsonObject {
+                put("type", "pair")
+                put("signature", sign("$PAIRING_PREFIX$nonce"))
+            }.toString()
+        )
+    }
 
+    private suspend fun handleMessage(message: JsonObject) {
+        when (message["type"]?.jsonPrimitive?.contentOrNull) {
             "hello" -> {
+                attempts = 0
                 val device = message["device"]?.jsonObject
                 val name = device?.get("name")?.jsonPrimitive?.contentOrNull
-                _state.value = MeshApiState.Connected(name)
-                authenticated.trySend(true)
-                ws.send(subscribeMessage())
+                setState(MeshApiState.Connected(name))
+                // Every authenticated connection subscribes again: a subscription does not outlive
+                // its socket.
+                scope.launch { subscribe() }
             }
 
             "event" -> handleEvent(message)
@@ -205,11 +271,29 @@ class MeshCoreApiClient(
         }
     }
 
-    private fun handleEvent(message: JsonObject) {
+    private suspend fun subscribe() {
+        val response = request(
+            "events.subscribe",
+            buildJsonObject {
+                put("events", buildJsonArray { add(JsonPrimitive("channel.data")) })
+                put("channel", channelName)
+                put("dataTypes", buildJsonArray { add(JsonPrimitive(dataType)) })
+                // Ask for what was heard while this app was not connected.
+                settings.meshCursor?.let { put("since", it) }
+            }
+        )
+        if (response?.get("ok")?.jsonPrimitive?.booleanOrNull != true) {
+            Log.w(TAG, "mesh API subscribe failed: $response")
+            setState(MeshApiState.Failed("subscription refused (is $channelName set up?)"))
+        }
+    }
+
+    private suspend fun handleEvent(message: JsonObject) {
         val event = message["event"]?.jsonObject ?: return
         if (event["type"]?.jsonPrimitive?.contentOrNull != "channel.data") return
         if (event["channel"]?.jsonPrimitive?.contentOrNull != channelName) return
         if (event["dataType"]?.jsonPrimitive?.intOrNull != dataType) return
+        if (event["outgoing"]?.jsonPrimitive?.booleanOrNull == true) return
         val payload = event["payload"]?.jsonPrimitive?.contentOrNull ?: return
         val bytes = try {
             Base64.decode(payload, Base64.DEFAULT)
@@ -217,10 +301,18 @@ class MeshCoreApiClient(
             return
         }
         val snr = event["snrDb"]?.jsonPrimitive?.doubleOrNull ?: 0.0
-        _datagrams.tryEmit(MeshDatagram(bytes, snr))
+        val receivedAt = event["receivedAt"]?.jsonPrimitive?.contentOrNull
+        _datagrams.emit(MeshDatagram(bytes, snr, receivedAt))
     }
 
-    /** Sends one application datagram; false when the API is not connected. */
+    private fun setState(value: MeshApiState) {
+        _state.value = value
+        _connected.value = value is MeshApiState.Connected
+    }
+
+    override suspend fun send(frame: ByteArray): Boolean = sendChannelData(frame)
+
+    /** Sends one application datagram; false when the API is not connected or refused it. */
     suspend fun sendChannelData(payload: ByteArray): Boolean {
         if (_state.value !is MeshApiState.Connected) return false
         val encoded = Base64.encodeToString(payload, Base64.NO_WRAP)
@@ -248,9 +340,7 @@ class MeshCoreApiClient(
             }.toString()
         )
         return try {
-            withTimeout(15_000) { response.receive() }
-        } catch (e: Exception) {
-            null
+            withTimeoutOrNull(15_000) { response.receiveCatching().getOrNull() }
         } finally {
             pending.remove(id)
         }
@@ -296,24 +386,6 @@ class MeshCoreApiClient(
         }
     }.toString()
 
-    private fun subscribeMessage(): String = buildJsonObject {
-        put("id", requestIds.incrementAndGet())
-        put("method", "events.subscribe")
-        putJsonObject("params") {
-            put("events", kotlinx.serialization.json.buildJsonArray {
-                add(JsonPrimitive("channel.data"))
-            })
-            put("channel", channelName)
-            put("dataTypes", kotlinx.serialization.json.buildJsonArray {
-                add(JsonPrimitive(dataType))
-            })
-            // Ask for what was heard while this app was not connected.
-            if (settings.meshSince > 0) {
-                put("since", java.time.Instant.ofEpochMilli(settings.meshSince).toString())
-            }
-        }
-    }.toString()
-
     private fun sign(message: String): String {
         val key = privateKey ?: error("no identity")
         val signer = Signature.getInstance("SHA256withECDSA")
@@ -337,5 +409,10 @@ class MeshCoreApiClient(
 
     private companion object {
         const val TAG = "MeshCoreApi"
+        const val PAIRING_PREFIX = "meshcore-open-pair-v1:"
+        val NONCE_SHAPE = Regex("^[A-Za-z0-9_-]{16,128}={0,2}$")
+        const val CLOSE_REFUSED = 4003
+        const val REFUSED_RETRY_MS = 120_000L
+        const val INBOX_CAPACITY = 1024
     }
 }

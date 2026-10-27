@@ -46,6 +46,7 @@ class RoadbeaconService : Service() {
         private const val TAG = "RoadbeaconService"
         private const val NOTIFICATION_ID = 1
         private const val SUBSCRIPTION_DEBOUNCE_MS = 5000L
+        private const val MESH_FIX_MAX_AGE_MS = 10 * 60 * 1000L
 
         const val ACTION_START = "app.roadbeacon.action.START"
         const val ACTION_STOP = "app.roadbeacon.action.STOP"
@@ -89,6 +90,8 @@ class RoadbeaconService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     /** Starts, stops or restarts the mesh bridge from the current settings, without a restart. */
+    private var meshUrlInUse: String? = null
+
     private fun applyMeshSettings() {
         val app = application as RoadbeaconApplication
         val enabled = app.settings.meshEnabled
@@ -98,11 +101,13 @@ class RoadbeaconService : Service() {
             app.meshClient = null
             return
         }
-        if (app.meshBridge != null) return
+        if (app.meshBridge != null && meshUrlInUse == app.settings.meshUrl) return
+        app.meshBridge?.stop()
+        meshUrlInUse = app.settings.meshUrl
         val client = MeshCoreApiClient(app.settings, serviceScope)
         val bridge = MeshBridge(
             settings = app.settings,
-            api = client,
+            transport = client,
             scope = serviceScope,
             onInbound = { event ->
                 when (event.kind) {
@@ -112,9 +117,15 @@ class RoadbeaconService : Service() {
             },
             publishToRelays = { event -> nostrClient.publish(event) },
             position = {
-                locationMonitor.getLastLocation()?.let { it.lat to it.lon }
+                // Only a recent fix: an hour-old position says nothing about what is near now.
+                locationMonitor.getLastLocation()
+                    ?.takeIf { System.currentTimeMillis() - it.timestamp < MESH_FIX_MAX_AGE_MS }
+                    ?.let { it.lat to it.lon }
             },
-            reportExists = { id -> eventCache.getReport(id) != null }
+            reportExists = { id -> eventCache.getReport(id) != null },
+            liveReportLocation = { id ->
+                eventCache.getAllActiveReports().firstOrNull { it.id == id }?.let { it.lat to it.lon }
+            }
         )
         app.meshClient = client
         app.meshBridge = bridge
@@ -280,12 +291,13 @@ class RoadbeaconService : Service() {
     }
 
     private fun handleNostrEvent(event: NostrEvent) {
-        // Offer relay events to the radio when "relay -> radio" is on.
-        (application as RoadbeaconApplication).meshBridge?.onRelayEvent(event)
         when (event.kind) {
             1315 -> handleReportEvent(event)
             1316 -> handleConfirmationEvent(event)
         }
+        // Offer relay events to the radio when "relay -> radio" is on; after the cache has them,
+        // so the bridge sees whether the report is still shown.
+        (application as RoadbeaconApplication).meshBridge?.onRelayEvent(event)
     }
 
     private fun handleReportEvent(event: NostrEvent) {
@@ -294,6 +306,8 @@ class RoadbeaconService : Service() {
             Log.d(TAG, "Ignoring a report outside the current format: ${event.id.take(8)}")
             return
         }
+        // The same report from a second relay or the radio: keep the cached one and its counts.
+        if (eventCache.getReport(event.id) != null) return
 
         val typeTag = event.tags.find { it[0] == "t" }
         if (typeTag == null) {
@@ -335,6 +349,8 @@ class RoadbeaconService : Service() {
         eventCache.addReport(roadEvent)
         mapLayerManager.addOrUpdateEvent(roadEvent)
         subscribeToConfirmations()
+        // Votes heard on the radio before this report can be applied now.
+        (application as RoadbeaconApplication).meshBridge?.onReportKnown(event.id)
     }
 
     private fun handleConfirmationEvent(event: NostrEvent) {
@@ -359,7 +375,7 @@ class RoadbeaconService : Service() {
 
         val report = eventCache.getReport(eTag[1])
         if (report != null) {
-            val confs = eventCache.getConfirmations(report.id)
+            val confs = eventCache.admissible(report, eventCache.getConfirmations(report.id))
             val updatedReport = report.copy(
                 confirmCount = confs.count { it.status == ConfirmationStatus.STILL_THERE },
                 denyCount = confs.count { it.status == ConfirmationStatus.NO_LONGER_THERE }
