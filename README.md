@@ -1,5 +1,7 @@
 # Roadbeacon
 
+<p align="center"><img src="images/icon-512.png" alt="Roadbeacon icon" width="128"></p>
+
 **A decentralized road event reporting system — "Waze without the centralized tracking"**
 
 <!-- jooray-links:start -->

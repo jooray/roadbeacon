@@ -5,6 +5,7 @@
     <!-- Primary - Electric Indigo -->
     <color name="primary">#6366F1</color>
     <color name="colorPrimary">#6366F1</color>
+    <color name="ic_launcher_background">#474DD3</color>
     <color name="onPrimary">#FFFFFF</color>
     <color name="primaryContainer">#4338CA</color>
     <color name="onPrimaryContainer">#E0E7FF</color>

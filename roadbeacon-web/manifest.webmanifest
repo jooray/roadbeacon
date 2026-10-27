@@ -1,0 +1,14 @@
+{
+  "name": "Roadbeacon",
+  "short_name": "Roadbeacon",
+  "description": "Decentralized road event reporting on Nostr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#474DD3",
+  "icons": [
+    {"src": "img/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "img/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

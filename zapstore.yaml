@@ -1,4 +1,5 @@
 repository: https://github.com/jooray/roadbeacon
 metadata_sources:
     - github
+icon: ./images/icon-512.png
 pubkey: npub1m2mvvpjugwdehtaskrcl7ksvdqnnhnjur9v6g9v266nss504q7mqvlr8p9
