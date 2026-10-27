@@ -186,6 +186,17 @@ object BinaryCodec {
         }
     }
 
+    /**
+     * True when [event] is in the current shared layout and could be framed. Anything else —
+     * including events of the deprecated layout with an `alt` tag or seven-decimal coordinates —
+     * is not supported any more.
+     */
+    fun isCanonical(event: NostrEvent): Boolean = when (event.kind) {
+        1315 -> reportFields(event) != null
+        1316 -> voteIsCanonical(event)
+        else -> false
+    }
+
     // ── decoding ────────────────────────────────────────────────────────────────────────────────
 
     /** Decode a report frame. The signature is not checked here — see the class doc. */

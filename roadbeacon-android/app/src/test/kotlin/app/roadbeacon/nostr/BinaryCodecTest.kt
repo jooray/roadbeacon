@@ -248,6 +248,26 @@ class BinaryCodecTest {
     }
 
     @Test
+    fun `only the current shared layout is accepted`() {
+        assertTrue(BinaryCodec.isCanonical(report()))
+        assertTrue(BinaryCodec.isCanonical(vote(report().id)))
+
+        // The deprecated layout: alt tag, t first, seven decimals, nine-tag votes.
+        assertFalse(BinaryCodec.isCanonical(report(extraTag = listOf("alt", "Roadstr: police report"))))
+        assertFalse(BinaryCodec.isCanonical(report(moveTypeFirst = true)))
+        assertFalse(BinaryCodec.isCanonical(report(lat = "48.8566140", lon = "2.3522220")))
+        assertFalse(
+            BinaryCodec.isCanonical(
+                vote(report().id).copy(
+                    tags = vote(report().id).tags + listOf(listOf("g", "u09t")),
+                ),
+            ),
+        )
+        // Not a road event at all.
+        assertFalse(BinaryCodec.isCanonical(report().copy(kind = 1)))
+    }
+
+    @Test
     fun `decode dispatches on the class bit`() {
         assertEquals(1315, BinaryCodec.decode(BinaryCodec.encodeReport(report())!!)!!.kind)
         assertEquals(1316, BinaryCodec.decode(BinaryCodec.encodeConfirmation(vote(report().id))!!)!!.kind)

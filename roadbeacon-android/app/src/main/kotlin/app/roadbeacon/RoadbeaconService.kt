@@ -272,6 +272,10 @@ class RoadbeaconService : Service() {
 
     private fun handleReportEvent(event: NostrEvent) {
         Log.d(TAG, "Received event: id=${event.id.take(8)}, kind=${event.kind}")
+        if (!BinaryCodec.isCanonical(event)) {
+            Log.d(TAG, "Ignoring a report outside the current format: ${event.id.take(8)}")
+            return
+        }
 
         val typeTag = event.tags.find { it[0] == "t" }
         if (typeTag == null) {
@@ -317,6 +321,10 @@ class RoadbeaconService : Service() {
 
     private fun handleConfirmationEvent(event: NostrEvent) {
         Log.d(TAG, "Confirmation received: ${event.id.take(8)}")
+        if (!BinaryCodec.isCanonical(event)) {
+            Log.d(TAG, "Ignoring a vote outside the current format: ${event.id.take(8)}")
+            return
+        }
         val eTag = event.tags.find { it[0] == "e" } ?: return
         val statusTag = event.tags.find { it[0] == "status" } ?: return
         val status = ConfirmationStatus.fromValue(statusTag[1]) ?: return  // Skip invalid

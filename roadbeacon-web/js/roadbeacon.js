@@ -112,6 +112,12 @@ export function parseReportEvent(event) {
   const gTags = event.tags.filter(t => t[0] === 'g');
   const expTag = event.tags.find(t => t[0] === 'expiration');
 
+  // Only the current shared layout: `lat, lon, g, g, g, t, expiration[, maxspeed]`, no alt.
+  const names = event.tags.map(t => t[0]);
+  if (event.tags.some(t => t[0] === 'alt')) return null;
+  if (names.slice(0, 6).join(',') !== 'lat,lon,g,g,g,t') return null;
+  if (names.length !== 7 && names.length !== 8) return null;
+
   if (!typeTag || gTags.length === 0) return null;
 
   const typeInfo = getTypeByString(typeTag[1]);
