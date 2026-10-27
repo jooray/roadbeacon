@@ -25,8 +25,9 @@ layout, which is deprecated (see [Appendix A](#appendix-a--the-deprecated-layout
 A road event report signals the presence of a notable condition at a specific geographic location.
 
 The `.content` field is a plain-text optional comment (e.g., `"Checking seatbelts"`). A comment is
-carried in the event and, up to 48 UTF-8 bytes, in the compact frame; longer comments are valid on
-relays but cannot be represented in a frame.
+carried in the event and, up to 46 UTF-8 bytes without control characters, in the compact frame;
+longer comments, or comments containing U+0000–U+001F or U+007F, are valid on relays but are never
+framed. Clients SHOULD NOT put control characters in a comment.
 
 ### Tags
 
@@ -105,7 +106,8 @@ Consequences:
   MUST NOT expect `#g` to find them. (A vote without a position cannot be area-queried, and that is
   a deliberate trade: it makes the 134-byte vote frame self-contained.)
 - A vote has no NIP-40 `expiration`; relays keep it unless they apply their own policy. Clients MUST
-  ignore votes older than their report and votes more than 5 minutes in the future.
+  ignore votes older than their report and votes more than 5 minutes in the future, and count one
+  vote per key (see [Display lifetime](#display-lifetime-client-side)).
 
 ## Categories
 
@@ -169,10 +171,15 @@ Choices the specification leaves open, made once:
 - one voice per key: only the latest vote of a key counts;
 - a vote older than its report, or more than 5 minutes in the future, is ignored;
 - votes with the same timestamp are applied denials first, so a tie keeps the report alive;
-- a report is hidden while the **last five minutes** contain more denials than confirmations (a tie
-  stays visible).
+- a report is hidden while the **last five minutes** contain more (admissible) denials than
+  confirmations (a tie stays visible).
 
-A client MUST NOT show a marker past the event's `expiration`: the data may no longer be served.
+These are requirements, not suggestions: two clients that count votes differently show different
+maps for the same events.
+
+A client MUST NOT show a marker past the event's `expiration`: the data may no longer be served. It
+MUST NOT hide a report earlier than this algorithm says either — in particular not at
+`created_at + 14 days` for a category whose lifetime is 30 days.
 
 ## Geohash Querying
 
@@ -207,7 +214,7 @@ For bandwidth-constrained transports (mesh networks, BLE), events are packed int
 rebuilt into fully verifiable Nostr events. Integers are big-endian. (MeshCore's own companion
 frames are little-endian; the payload inside a channel datagram is opaque to the radio.)
 
-### Report frame (117 + N bytes, 0 ≤ N ≤ 48)
+### Report frame (117 + N bytes, 0 ≤ N ≤ 46 when encoding, ≤ 48 when decoding)
 
 ```
 Offset  Size  Field
@@ -224,8 +231,14 @@ Offset  Size  Field
 53+N    64    Schnorr signature (BIP-340)
 ```
 
-Largest frame: 165 bytes, exactly the MeshCore channel-data payload limit. A comment over 48 bytes
-cannot be framed; it is never truncated.
+Largest frame an encoder produces: **163 bytes** (N = 46). That is what a MeshCore companion link
+(BLE, and MeshCore Open's local API on top of it) accepts for one channel datagram; the radio itself
+carries 165. An encoder MUST refuse a comment over 46 bytes or one containing a control character
+(U+0000–U+001F, U+007F); a comment is never truncated or cleaned up, because that would change the
+signed event.
+
+A decoder MUST accept N up to 48 (frames up to 165 bytes, which a serial-connected node could
+send) and MUST reject a comment that is not valid UTF-8 or contains a control character.
 
 ### Vote frame (134 bytes)
 
@@ -296,13 +309,13 @@ ID. Refusal reasons (stable names):
 | Code | Meaning |
 |---|---|
 | `WRONG_KIND`, `MALFORMED_EVENT` | not a well-formed 1315/1316 event |
-| `NON_CANONICAL` | tag order, spelling, extra tag, `expiration` or coordinate text differs |
+| `NON_CANONICAL` | tag order, spelling, extra tag, `expiration` or coordinate text differs; comment with a control character or invalid UTF-8 |
 | `UNKNOWN_TYPE` | `t` not in the registry |
 | `COORDINATE_RANGE` | outside ±90° / ±180° |
 | `TIMESTAMP_RANGE` | `created_at` or `expiration` does not fit in uint32 |
-| `COMMENT_TOO_LONG` | comment over 48 UTF-8 bytes |
+| `COMMENT_TOO_LONG` | comment over 46 UTF-8 bytes (encoding) |
 | `BAD_SPEED_LIMIT` | `maxspeed` outside 5–300 or not canonical text |
-| `BAD_LENGTH` | frame length inconsistent with its class or comment length |
+| `BAD_LENGTH` | frame length inconsistent with its class or comment length, or over 165 bytes |
 | `BAD_VERSION`, `RESERVED_BITS`, `BAD_STATUS` | flags or status byte invalid |
 | `SIGNATURE_INVALID` | the ID or signature does not verify |
 
@@ -311,10 +324,21 @@ validity before doing any signature work.
 
 ### Conformance vectors
 
-A vector file is to be generated for this frame layout (the previous one described the deprecated
-layout and is obsolete). Until it exists, the two reference implementations are the contract:
-Roadbeacon's `BinaryCodecTest` pins a frame and event ID computed independently, and the Roadstr
-client is expected to add the layout to its interop document.
+[`vectors/road-events-v1.json`](vectors/road-events-v1.json) is the contract. It is generated by
+[`tools/gen_road_event_vectors.py`](../tools/gen_road_event_vectors.py), a standalone
+implementation (Python standard library, the BIP-340 reference code, fixed keys, zero auxiliary
+randomness), so it reproduces byte for byte. It holds:
+
+| Section | An implementation must |
+|---|---|
+| `valid` | encode the event to exactly `frame`, decode `frame` to exactly `event`, verify the signature |
+| `decode_only` | decode the frame to `event` (ephemeral flag, 47/48-byte comments) — and refuse to encode the 47/48-byte ones |
+| `decode_invalid` | refuse the frame with `error` (`SIGNATURE_INVALID` = decodes, does not verify) |
+| `encode_invalid` | refuse the event with `error` |
+
+Roadbeacon (`ConformanceVectorsTest`, `roadbeacon-web/test/vectors.mjs`) and Roadstr
+(`CompactRoadCodec` tests) both run the whole file. A change that alters any vector is a new frame
+version.
 
 ## Mesh Transport
 
@@ -325,13 +349,11 @@ protocol), with:
   `b7f4317db7b03aeb563b2c4bdc476d6a`) — a public channel by construction, not a privacy feature;
 - `data_type`: `0xFF52` (inside the firmware's unregistered testing range) until a stable value is
   registered with MeshCore in `0100–FEFF`;
-- payload: 117–165 bytes for a report, 134 for a vote; never 166–167, which pass one check and then
-  fail permanently in the radio. A BLE companion link caps a datagram at 163 bytes (the notification
-  size), so in practice a report with a comment longer than 46 bytes is relay-only; radio-first
-  clients should keep comments short.
+- payload: 117–163 bytes for a report (up to 165 accepted), 134 for a vote. A comment longer than
+  46 bytes keeps a report relay-only; radio-first clients should keep comments short.
 
 Rate limits, de-duplication and bridge consent are part of any implementation's obligations: a
-report is 117–165 bytes, roughly 0.6–0.9 s of airtime at SF9/125 kHz, so a misbehaving bridge is a
+report is 117–163 bytes, roughly 0.6–0.9 s of airtime at SF9/125 kHz, so a misbehaving bridge is a
 channel-wide problem. The operational details — topology, the `#roadstr` channel, `0xFF52`, the
 one-BLE-owner local API and the bridge limits — are in
 [`docs/meshcore.md`](../docs/meshcore.md).
@@ -352,10 +374,10 @@ expiration:         created_at + 1209600 (always)
 alt:                "Roadstr: <type> report" / "Roadstr: event confirmed" / "Roadstr: event denied"
 ```
 
-It is **deprecated**: clients MUST NOT write it, and the frame defined above cannot carry it (the
-rebuilt tags would differ, so the signature would not verify). Existing events in that layout remain
-valid Nostr events and may be displayed; they expire within 14 days of their creation. A client can
-recognise them by the `alt` tag or by `t` appearing before `lat`.
+It is **deprecated**: clients MUST NOT write it and SHOULD NOT display it (the reference clients
+ignore it), and the frame defined above cannot carry it (the rebuilt tags would differ, so the
+signature would not verify). Such events expire on relays within 14 days of their creation. A client
+can recognise them by the `alt` tag or by `t` appearing before `lat`.
 
 The old frame (110 bytes for a report, 134 for a vote with coordinates in its tags) is likewise
 obsolete and MUST NOT be decoded as the frames above; the vote frame has the same length but a

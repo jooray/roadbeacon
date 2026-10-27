@@ -42,7 +42,7 @@ Left: Android app, Right: OsmAnd integration showing events and Report button
 - **Decentralized**: Events published to Nostr relays, no central server
 - **Verifiable**: All events cryptographically signed with secp256k1 Schnorr signatures
 - **Privacy-aware**: Use persistent identity or ephemeral keys per event
-- **Mesh-ready**: Compact binary format (117–165 bytes for a report, 134 for a vote) designed for MeshCore transport, with a strict encoder that refuses anything that cannot be rebuilt byte for byte
+- **Mesh-ready**: Compact binary format (117–163 bytes for a report, 134 for a vote) designed for MeshCore transport, with a strict encoder that refuses anything that cannot be rebuilt byte for byte
 - **Android + Web**: OsmAnd plugin for in-car navigation, browser interface for browsing
 
 ### Event Types
@@ -123,7 +123,7 @@ Roadbeacon uses two new Nostr event kinds:
 - **Kind 1315**: Road event reports (police, accidents, hazards, etc.)
 - **Kind 1316**: Confirmations/denials of existing reports
 
-Reports include geohash tags at multiple precision levels (4, 5, 6 characters) for efficient spatial querying; votes are two tags and are fetched by `#e` for the reports in view. The compact binary encoding (117–165 bytes for a report including up to 48 bytes of comment, 134 for a self-contained vote) enables mesh transport while preserving cryptographic verifiability.
+Reports include geohash tags at multiple precision levels (4, 5, 6 characters) for efficient spatial querying; votes are two tags and are fetched by `#e` for the reports in view. The compact binary encoding (117–163 bytes for a report including up to 46 bytes of comment, 134 for a self-contained vote) enables mesh transport while preserving cryptographic verifiability.
 
 See `nips/road-events.md` for the specification. The format is called **Road Events** and carries no brand in any event.
 

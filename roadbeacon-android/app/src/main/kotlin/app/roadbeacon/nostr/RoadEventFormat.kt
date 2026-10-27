@@ -15,8 +15,21 @@ object RoadEventFormat {
     /** Floor for relay-side retention (NIP-40): 14 days. */
     const val RELAY_TTL_SECONDS = 1_209_600L
 
-    /** Largest comment that fits in one report frame (165 - 117 bytes of fixed fields). */
-    const val MAX_COMMENT_BYTES = 48
+    /**
+     * Largest comment an encoder may put in a report frame: 117 + 46 = 163 bytes, the most a
+     * MeshCore companion (BLE) link or MeshCore Open's local API accepts for one datagram.
+     */
+    const val MAX_COMMENT_BYTES = 46
+
+    /**
+     * Largest comment a decoder accepts: 117 + 48 = 165 bytes, the radio's own payload limit. Such
+     * frames are valid but no encoder produces them.
+     */
+    const val MAX_DECODED_COMMENT_BYTES = 48
+
+    /** C0 controls and DEL are not allowed in a comment that travels as a frame. */
+    fun commentIsFramable(comment: String): Boolean =
+        comment.none { it.code < 0x20 || it.code == 0x7F }
 
     /** What the `expiration` tag must be for a report of [type] created at [createdAt]. */
     fun expirationFor(createdAt: Long, type: EventType): Long =

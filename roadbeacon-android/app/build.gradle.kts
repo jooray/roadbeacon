@@ -54,8 +54,17 @@ android {
         jvmTarget = "17"
     }
 
+    testOptions {
+        // android.util.Log in code under test returns defaults instead of throwing.
+        unitTests.isReturnDefaultValues = true
+    }
+
+    // The conformance vectors live with the NIP and are shared with the Roadstr client.
+    sourceSets["test"].resources.srcDir("../../nips/vectors")
+
     buildFeatures {
         aidl = true
+        buildConfig = true
         viewBinding = true
     }
 }
@@ -80,5 +89,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("io.mockk:mockk:1.13.8")
+    // Desktop JNI build of the same library, so JVM tests verify real BIP-340 signatures.
+    testImplementation("fr.acinq.secp256k1:secp256k1-kmp-jni-jvm:0.15.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }

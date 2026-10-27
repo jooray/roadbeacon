@@ -36,8 +36,11 @@ object BinaryCodec {
     /** Fixed part of a report frame: flags..content length + signature. */
     const val REPORT_BASE_SIZE = 117
 
-    /** Largest report frame: a comment of [RoadEventFormat.MAX_COMMENT_BYTES] bytes. */
+    /** Largest report frame an encoder produces: a comment of [RoadEventFormat.MAX_COMMENT_BYTES]. */
     const val REPORT_MAX_SIZE = REPORT_BASE_SIZE + RoadEventFormat.MAX_COMMENT_BYTES
+
+    /** Largest report frame a decoder accepts (see [RoadEventFormat.MAX_DECODED_COMMENT_BYTES]). */
+    const val REPORT_MAX_DECODED_SIZE = REPORT_BASE_SIZE + RoadEventFormat.MAX_DECODED_COMMENT_BYTES
 
     const val CONFIRMATION_SIZE = 134
 
@@ -79,12 +82,13 @@ object BinaryCodec {
     /**
      * Pack a signed kind 1315 report. Returns null when the event cannot be represented exactly:
      * wrong kind, extra tags, non-canonical text, a comment over [RoadEventFormat.MAX_COMMENT_BYTES]
-     * bytes, or anything else that would not decode back to the same event.
+     * bytes or with control characters, or anything else that would not decode back to the same event.
      */
     fun encodeReport(event: NostrEvent, ephemeral: Boolean = false): ByteArray? {
         val fields = reportFields(event) ?: return null
         val contentBytes = event.content.toByteArray(StandardCharsets.UTF_8)
         if (contentBytes.size > RoadEventFormat.MAX_COMMENT_BYTES) return null
+        if (!RoadEventFormat.commentIsFramable(event.content)) return null
 
         val size = REPORT_BASE_SIZE + contentBytes.size
         val bytes = ByteBuffer.allocate(size).order(ByteOrder.BIG_ENDIAN).apply {
@@ -201,14 +205,14 @@ object BinaryCodec {
 
     /** Decode a report frame. The signature is not checked here — see the class doc. */
     fun decodeReport(data: ByteArray): NostrEvent? {
-        if (data.size !in REPORT_BASE_SIZE..REPORT_MAX_SIZE) return null
+        if (data.size !in REPORT_BASE_SIZE..REPORT_MAX_DECODED_SIZE) return null
         val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
 
         val flags = buffer.get().toInt() and 0xFF
         if (!flagsAreValid(flags, expectConfirmation = false)) return null
 
         val contentLength = data[OFF_CONTENT_LENGTH].toInt() and 0xFF
-        if (contentLength > RoadEventFormat.MAX_COMMENT_BYTES) return null
+        if (contentLength > RoadEventFormat.MAX_DECODED_COMMENT_BYTES) return null
         if (data.size != REPORT_BASE_SIZE + contentLength) return null
 
         val pubkey = ByteArray(PUBKEY_SIZE).also { buffer.get(it) }
@@ -226,6 +230,7 @@ object BinaryCodec {
 
         val contentBytes = data.copyOfRange(OFF_CONTENT, OFF_CONTENT + contentLength)
         val content = decodeUtf8(contentBytes) ?: return null
+        if (!RoadEventFormat.commentIsFramable(content)) return null
         val sigOffset = OFF_REPORT_SIG + contentLength
         if (sigOffset + SIG_SIZE != data.size) return null
         val sig = data.copyOfRange(sigOffset, sigOffset + SIG_SIZE)
@@ -296,7 +301,7 @@ object BinaryCodec {
     }
 
     fun isReport(data: ByteArray): Boolean {
-        if (data.size !in REPORT_BASE_SIZE..REPORT_MAX_SIZE) return false
+        if (data.size !in REPORT_BASE_SIZE..REPORT_MAX_DECODED_SIZE) return false
         return (data[0].toInt() and FLAG_CONFIRMATION) == 0
     }
 

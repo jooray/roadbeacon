@@ -124,20 +124,21 @@ Improvements considered and rejected:
 
 ### 5.1 Sizes
 
-| Object | Bytes | Fits 165 B? |
+| Object | Bytes | Sent by radio? |
 |---|---|---|
 | Report, no comment | 117 | yes |
-| Report, 48-byte comment | 165 | exactly |
-| Report, longer comment | — | no: relay-only, never truncated |
+| Report, 46-byte comment | 163 | yes: the largest frame an encoder makes |
+| Report, 47–48-byte comment | 164–165 | decoded if heard, never encoded (BLE/local API carry 163) |
+| Report, longer comment or control characters | — | no: relay-only, never truncated |
 | Vote | 134 | yes, self-contained |
 
 The report frame carries key, time, lat/lon (×10⁶), category, `expiration`, `maxspeed` (uint16,
 0 = absent), comment length + UTF-8 bytes, and the signature. The vote carries key, time, report ID,
 status and signature; nothing needs to be looked up.
 
-48 bytes of comment is ≈48 Latin characters or ≈16 CJK characters — enough for "police checking
-seatbelts". Over a BLE companion link the usable datagram is 163 bytes, so 46 comment bytes is the
-practical limit unless the transport is serial/USB (165). Two-packet comments were considered and rejected: partial events and reassembly state
+46 bytes of comment is ≈46 Latin characters or ≈15 CJK characters — enough for "police checking
+seatbelts". The radio carries 165, but a BLE companion link and MeshCore Open's local API carry 163,
+so encoders stop at 46 bytes; decoders still accept 48. Two-packet comments were considered and rejected: partial events and reassembly state
 are not worth it for a comment that long. If field data ever says otherwise, that is a new frame
 version, not a silent change.
 
@@ -154,7 +155,7 @@ That is not a supported path and it will disappear on its own.
 
 ### 5.3 Airtime
 
-At SF9/125 kHz a 117–165-byte report is roughly 0.6–0.9 s on air, a 134-byte vote about 0.7 s,
+At SF9/125 kHz a 117–163-byte report is roughly 0.6–0.9 s on air, a 134-byte vote about 0.7 s,
 before MeshCore's own header. Enough that rate limits and de-duplication are protocol requirements,
 not tuning. Measure on real hardware before promising numbers; nobody has yet.
 
@@ -169,7 +170,7 @@ The protocol move is the larger part:
 |---|---|
 | Writer: shared layout, six decimals, no `alt`, `maxspeed` support, `expiration = max(14 d, lifetime)` | `EventSigner.kt` |
 | Vote: two tags, no position, no expiration | `EventSigner.kt` |
-| Frame: 117–165-byte reports, self-contained 134-byte votes, strict refusal | `BinaryCodec.kt` |
+| Frame: 117–163-byte reports, self-contained 134-byte votes, strict refusal | `BinaryCodec.kt` |
 | Coordinates: integer E6 parse/format, locale-free, no truncation | `CanonicalCoordinates.kt` |
 | Category table: their 15 categories, values 0–13, 255 | `EventType.kt` |
 | Lifetime: display expiry capped at the event's `expiration` | `EventCache.kt` |
@@ -325,10 +326,11 @@ This repository: `nips/road-events.md`, `docs/ecosystem.md`,
 
 | Number | Meaning |
 |---|---|
-| 117 / 165 | report frame without / with a 48-byte comment |
+| 117 / 163 | report frame without / with a 46-byte comment (largest encoded) |
+| 165 | largest frame decoded (48-byte comment); the radio's own payload limit |
 | 134 | vote frame, self-contained |
-| 48 | comment limit in UTF-8 bytes |
-| 165 | largest MeshCore channel-data payload current firmware accepts |
+| 46 | comment limit in UTF-8 bytes when encoding |
+| 163 | largest channel datagram over BLE / MeshCore Open's local API |
 | 14 d / 30 d | relay retention floor / long-lived category lifetime |
 | 0xFF52 | `data_type` until registration |
 | `b7f4317db7b03aeb563b2c4bdc476d6a` | channel key of `#roadstr` |

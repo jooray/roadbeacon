@@ -10,13 +10,13 @@
 
 Roadbeacon is a decentralized road event reporting system built on the Nostr protocol. It operates as an OsmAnd plugin (Android) that allows drivers to report, confirm, and view road events (police checks, construction, closures, traffic jams, etc.) directly from the navigation interface. Events are published as signed Nostr events and displayed as color-coded map markers.
 
-A compact binary encoding allows events to be transferred over MeshCore mesh networks in one datagram (117–165 bytes for a report including its comment, 134 for a self-contained vote), allowing off-grid propagation of road reports.
+A compact binary encoding allows events to be transferred over MeshCore mesh networks in one datagram (117–163 bytes for a report including its comment, 134 for a self-contained vote), allowing off-grid propagation of road reports.
 
 ### Design Principles
 
 - **Decentralized**: No central server. Events are published to Nostr relays.
 - **Verifiable**: All events are cryptographically signed. Any recipient can verify authenticity.
-- **Compact**: Binary representation allows mesh network transfer in one 117–165-byte datagram.
+- **Compact**: Binary representation allows mesh network transfer in one 117–163-byte datagram.
 - **Trust-all model (v1)**: No reputation system. All users are trusted equally.
 - **Privacy-configurable**: Users choose between persistent identity or ephemeral keys.
 
@@ -126,8 +126,9 @@ The numeric value is the byte carried in the frame. Reserved values MUST NOT be 
 
 ## 4. Compact Binary Format
 
-A report is **117 bytes plus its comment** (0–48 UTF-8 bytes, 165 bytes maximum — the MeshCore
-channel-data payload limit). A vote is **134 bytes** and needs no other event to be rebuilt.
+A report is **117 bytes plus its comment** (0–46 UTF-8 bytes without control characters when
+encoding, 163 bytes maximum — the MeshCore companion/local-API datagram limit; decoders accept up to
+48 bytes, 165 total). A vote is **134 bytes** and needs no other event to be rebuilt.
 
 | Frame | Layout |
 |---|---|
@@ -595,7 +596,7 @@ aa…aa                           # 64-byte signature (test material)
 lat=48.856614  lon=2.352222  g=u09t,u09tv,u09tvw  t=police  expiration=1701209600
 ```
 
-A 48-byte comment adds 48 bytes before the signature (165 total). `maxspeed` is a uint16 after
+A 46-byte comment adds 46 bytes before the signature (163 total). `maxspeed` is a uint16 after
 `expiration`, 0 meaning the tag is absent.
 
 A new shared vector file for this layout is still to be generated; until then this example and the

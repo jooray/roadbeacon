@@ -113,23 +113,31 @@ class BinaryCodecTest {
     }
 
     @Test
-    fun `comment of 48 bytes fits, 49 does not`() {
+    fun `comment of 46 bytes fits, 47 does not`() {
         val fits = report(content = "a".repeat(RoadEventFormat.MAX_COMMENT_BYTES))
         val encoded = BinaryCodec.encodeReport(fits)!!
-        assertEquals(165, encoded.size)
+        assertEquals(163, encoded.size)
         assertEquals(fits.content, BinaryCodec.decodeReport(encoded)!!.content)
 
-        assertNull(BinaryCodec.encodeReport(report(content = "a".repeat(49))))
+        assertNull(BinaryCodec.encodeReport(report(content = "a".repeat(47))))
     }
 
     @Test
     fun `comment limit is counted in UTF-8 bytes, not characters`() {
-        val twoByte = "ě".repeat(24) // 48 bytes
-        assertEquals(48, twoByte.toByteArray(Charsets.UTF_8).size)
+        val twoByte = "ě".repeat(23) // 46 bytes
+        assertEquals(46, twoByte.toByteArray(Charsets.UTF_8).size)
         assertNotNull(BinaryCodec.encodeReport(report(content = twoByte)))
 
-        val tooLong = "ě".repeat(25) // 50 bytes
+        val tooLong = "ě".repeat(24) // 48 bytes: decodable, never encoded
         assertNull(BinaryCodec.encodeReport(report(content = tooLong)))
+    }
+
+    @Test
+    fun `control characters keep a comment off the radio`() {
+        assertNull(BinaryCodec.encodeReport(report(content = "line\nbreak")))
+        assertNull(BinaryCodec.encodeReport(report(content = "tab\there")))
+        assertNull(BinaryCodec.encodeReport(report(content = "del\u007F")))
+        assertNotNull(BinaryCodec.encodeReport(report(content = "Pozor, ľad!")))
     }
 
     @Test
