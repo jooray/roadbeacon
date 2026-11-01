@@ -91,7 +91,7 @@ class MeshBridgeTest {
         )
 
         fun hear(event: NostrEvent, receivedAt: String? = null) =
-            bridge.onDatagram(MeshDatagram(frame(event), 0.0, receivedAt))
+            bridge.onDatagram(MeshDatagram(frame(event), 0.0, receivedAt, null))
     }
 
     private fun frame(event: NostrEvent): ByteArray = when (event.kind) {
@@ -111,7 +111,7 @@ class MeshBridgeTest {
     fun `a tampered frame is dropped before anything sees it`() = runTest {
         val h = Harness(this)
         val tampered = frame(report).also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() }
-        h.bridge.onDatagram(MeshDatagram(tampered, 0.0, null))
+        h.bridge.onDatagram(MeshDatagram(tampered, 0.0, null, null))
         assertTrue(h.shown.isEmpty())
         assertTrue(h.published.isEmpty())
     }
@@ -295,7 +295,7 @@ class MeshBridgeTest {
     @Test
     fun `radio input is capped at 60 frames a minute`() = runTest {
         val h = Harness(this)
-        repeat(60) { h.bridge.onDatagram(MeshDatagram(ByteArray(10), 0.0, null)) }
+        repeat(60) { h.bridge.onDatagram(MeshDatagram(ByteArray(10), 0.0, null, null)) }
         h.hear(report)
         assertTrue(h.shown.isEmpty())
         h.nowMs += 61_000

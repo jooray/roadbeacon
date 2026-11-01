@@ -20,13 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -51,19 +46,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.pow
 
-/** One channel datagram; [receivedAt] is MeshCore Open's receive time, the replay cursor. */
-data class MeshDatagram(val payload: ByteArray, val snrDb: Double, val receivedAt: String?)
-
-sealed interface MeshApiState {
-    data object Disconnected : MeshApiState
-    data object Connecting : MeshApiState
-    /** The user has to approve this app in MeshCore Open. */
-    data object WaitingForApproval : MeshApiState
-    /** MeshCore Open refused or revoked this app; retried slowly. */
-    data object NotApproved : MeshApiState
-    data class Connected(val deviceName: String?) : MeshApiState
-    data class Failed(val message: String) : MeshApiState
-}
+/**
+ * One channel datagram; [receivedAt] is MeshCore Open's receive time, the replay cursor. [hops] is
+ * the flood hop count (0 = heard from the sender's radio), null for a direct path or when the
+ * server does not say.
+ */
+data class MeshDatagram(val payload: ByteArray, val snrDb: Double, val receivedAt: String?, val hops: Int?)
 
 /**
  * Client for MeshCore Open's local API (`documentation/LOCAL_API.md` there).
@@ -74,12 +62,15 @@ sealed interface MeshApiState {
  * No shared secret. The client builds the string it signs from the nonce itself
  * and signs once per connection, so it is never a signing oracle for whatever
  * listens on the port.
+ *
+ * After `hello` the connection follows the radio ([MeshApiSession] decides): it subscribes while
+ * MeshCore Open is connected to the radio, waits on a `device` message while it is not, and asks
+ * once with `channels.join` when the radio has no [channelName] channel.
  */
 class MeshCoreApiClient(
     private val settings: Settings,
     private val scope: CoroutineScope,
     private val channelName: String = "#roadstr",
-    private val dataType: Int = 0xFF52,
     private val clientName: String = "Roadbeacon",
     private val clientVersion: String = BuildConfig.VERSION_NAME
 ) : MeshTransport {
@@ -108,6 +99,8 @@ class MeshCoreApiClient(
     private var attempts = 0
     private val requestIds = AtomicLong(0)
     private val pending = ConcurrentHashMap<Long, Channel<JsonObject>>()
+    private val session = MeshApiSession(channelName)
+    @Volatile private var retry: Job? = null
 
     private var privateKey: java.security.PrivateKey? = null
     private var publicKeyRaw: ByteArray? = null
@@ -123,6 +116,8 @@ class MeshCoreApiClient(
         generation++
         loop?.cancel()
         loop = null
+        retry?.cancel()
+        retry = null
         socket?.close(1000, "app stopping")
         socket = null
         pending.values.forEach { it.close() }
@@ -166,6 +161,7 @@ class MeshCoreApiClient(
     private suspend fun connectOnce(): Boolean {
         ensureIdentity()
         val connection = ++generation
+        session.connectionStarted()
         val request = Request.Builder().url(settings.meshUrl).build()
         val inbox = Channel<String>(INBOX_CAPACITY)
         var closeCode = 0
@@ -216,9 +212,11 @@ class MeshCoreApiClient(
                     }
                     continue
                 }
-                handleMessage(message)
+                handleMessage(message, connection)
             }
         } finally {
+            retry?.cancel()
+            retry = null
             ws.cancel()
             if (socket === ws) socket = null
             pending.values.forEach { it.close() }
@@ -244,17 +242,16 @@ class MeshCoreApiClient(
         )
     }
 
-    private suspend fun handleMessage(message: JsonObject) {
+    private suspend fun handleMessage(message: JsonObject, connection: Int) {
         when (message["type"]?.jsonPrimitive?.contentOrNull) {
             "hello" -> {
                 attempts = 0
-                val device = message["device"]?.jsonObject
-                val name = device?.get("name")?.jsonPrimitive?.contentOrNull
-                setState(MeshApiState.Connected(name))
                 // Every authenticated connection subscribes again: a subscription does not outlive
                 // its socket.
-                scope.launch { subscribe() }
+                perform(session.onHello(message), connection)
             }
+
+            "device" -> perform(session.onDevice(message), connection)
 
             "event" -> handleEvent(message)
 
@@ -271,38 +268,62 @@ class MeshCoreApiClient(
         }
     }
 
-    private suspend fun subscribe() {
+    /** Carries out what [session] decided, then publishes its state. */
+    private fun perform(action: MeshApiSession.Action, connection: Int) {
+        if (connection != generation || stopped) return
+        when (action) {
+            MeshApiSession.Action.Subscribe -> scope.launch { subscribe(connection) }
+            MeshApiSession.Action.Join -> scope.launch { join(connection) }
+            MeshApiSession.Action.None -> Unit
+        }
+        setState(session.state)
+        if (session.retryDue()) scheduleRetry(connection)
+    }
+
+    /**
+     * Fallback for servers that never send `device`: a connection without a subscription refreshes
+     * `device.info` and subscribes again after [RETRY_MS] instead of staying stuck.
+     */
+    private fun scheduleRetry(connection: Int) {
+        retry?.cancel()
+        retry = scope.launch {
+            delay(RETRY_MS)
+            if (connection != generation || !session.retryDue()) return@launch
+            val info = request("device.info", buildJsonObject { })
+            if (connection != generation) return@launch
+            perform(session.onRetry(info), connection)
+        }
+    }
+
+    private suspend fun subscribe(connection: Int) {
+        session.takeStaleSubscription()?.let { old ->
+            request("events.unsubscribe", buildJsonObject { put("subscriptionId", old) })
+        }
         val response = request(
             "events.subscribe",
-            buildJsonObject {
-                put("events", buildJsonArray { add(JsonPrimitive("channel.data")) })
-                put("channel", channelName)
-                put("dataTypes", buildJsonArray { add(JsonPrimitive(dataType)) })
-                // Ask for what was heard while this app was not connected.
-                settings.meshCursor?.let { put("since", it) }
-            }
+            MeshApiSession.subscribeParams(channelName, RECEIVE_DATA_TYPES, settings.meshCursor)
         )
-        if (response?.get("ok")?.jsonPrimitive?.booleanOrNull != true) {
-            Log.w(TAG, "mesh API subscribe failed: $response")
-            setState(MeshApiState.Failed("subscription refused (is $channelName set up?)"))
-        }
+        if (connection != generation) return
+        if (!MeshApiSession.isOk(response)) Log.w(TAG, "mesh API subscribe failed: $response")
+        perform(session.onSubscribeAnswer(response), connection)
+    }
+
+    /** Asks MeshCore Open to add the channel; the user answers a prompt there, so this waits long. */
+    private suspend fun join(connection: Int) {
+        val response = request(
+            "channels.join",
+            buildJsonObject { put("name", channelName) },
+            timeoutMs = JOIN_TIMEOUT_MS
+        )
+        if (connection != generation) return
+        if (!MeshApiSession.isOk(response)) Log.w(TAG, "mesh API channels.join failed: $response")
+        perform(session.onJoinAnswer(response), connection)
     }
 
     private suspend fun handleEvent(message: JsonObject) {
         val event = message["event"]?.jsonObject ?: return
-        if (event["type"]?.jsonPrimitive?.contentOrNull != "channel.data") return
-        if (event["channel"]?.jsonPrimitive?.contentOrNull != channelName) return
-        if (event["dataType"]?.jsonPrimitive?.intOrNull != dataType) return
-        if (event["outgoing"]?.jsonPrimitive?.booleanOrNull == true) return
-        val payload = event["payload"]?.jsonPrimitive?.contentOrNull ?: return
-        val bytes = try {
-            Base64.decode(payload, Base64.DEFAULT)
-        } catch (e: Exception) {
-            return
-        }
-        val snr = event["snrDb"]?.jsonPrimitive?.doubleOrNull ?: 0.0
-        val receivedAt = event["receivedAt"]?.jsonPrimitive?.contentOrNull
-        _datagrams.emit(MeshDatagram(bytes, snr, receivedAt))
+        val datagram = MeshApiSession.datagram(event, channelName, RECEIVE_DATA_TYPES) ?: return
+        _datagrams.emit(datagram)
     }
 
     private fun setState(value: MeshApiState) {
@@ -315,19 +336,26 @@ class MeshCoreApiClient(
     /** Sends one application datagram; false when the API is not connected or refused it. */
     suspend fun sendChannelData(payload: ByteArray): Boolean {
         if (_state.value !is MeshApiState.Connected) return false
-        val encoded = Base64.encodeToString(payload, Base64.NO_WRAP)
+        val connection = generation
+        // Empty: MeshCore Open applies the channel's or the radio's own flood scope.
+        val region = settings.meshRegion.trim().ifEmpty { null }
         val response = request(
             "channel.sendData",
-            buildJsonObject {
-                put("channel", channelName)
-                put("dataType", dataType)
-                put("payload", encoded)
-            }
+            MeshApiSession.sendParams(channelName, SEND_DATA_TYPE, payload, region)
         ) ?: return false
-        return response["ok"]?.jsonPrimitive?.booleanOrNull == true
+        val ok = session.onSendAnswer(response, region)
+        if (!ok) Log.w(TAG, "mesh API send refused: ${MeshApiSession.errorCode(response)}")
+        if (connection == generation && !stopped && _state.value is MeshApiState.Connected) {
+            setState(session.state)
+        }
+        return ok
     }
 
-    private suspend fun request(method: String, params: JsonObject): JsonObject? {
+    private suspend fun request(
+        method: String,
+        params: JsonObject,
+        timeoutMs: Long = REQUEST_TIMEOUT_MS
+    ): JsonObject? {
         val ws = socket ?: return null
         val id = requestIds.incrementAndGet()
         val response = Channel<JsonObject>(Channel.CONFLATED)
@@ -340,7 +368,7 @@ class MeshCoreApiClient(
             }.toString()
         )
         return try {
-            withTimeoutOrNull(15_000) { response.receiveCatching().getOrNull() }
+            withTimeoutOrNull(timeoutMs) { response.receiveCatching().getOrNull() }
         } finally {
             pending.remove(id)
         }
@@ -414,5 +442,20 @@ class MeshCoreApiClient(
         const val CLOSE_REFUSED = 4003
         const val REFUSED_RETRY_MS = 120_000L
         const val INBOX_CAPACITY = 1024
+        const val REQUEST_TIMEOUT_MS = 15_000L
+        /** MeshCore Open's prompt for `channels.join` stays up to 2 min; wait past that. */
+        const val JOIN_TIMEOUT_MS = 150_000L
+        const val RETRY_MS = 60_000L
+
+        /**
+         * The `dataType` this app sends with: MeshCore's development range for now. Switch to
+         * [DATA_TYPE_ROAD_EVENTS] once MeshCore's allocation PR (`docs/number_allocations.md`) is
+         * merged.
+         */
+        const val SEND_DATA_TYPE = 0xFF52
+        /** "Road Events", requested from MeshCore's registry. */
+        const val DATA_TYPE_ROAD_EVENTS = 0x0150
+        /** Both are received, before and after the switch. */
+        val RECEIVE_DATA_TYPES = listOf(0xFF52, DATA_TYPE_ROAD_EVENTS)
     }
 }

@@ -4,7 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.*
 import app.roadbeacon.RoadbeaconApplication
 import app.roadbeacon.RoadbeaconService
@@ -13,9 +15,15 @@ import app.roadbeacon.mesh.MeshCoreApiClient
 import app.roadbeacon.model.EventType
 import app.roadbeacon.util.UnitFormatter
 import app.roadbeacon.util.UnitSystem
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class SettingsFragment : PreferenceFragmentCompat() {
+
+    private companion object {
+        const val MESHCORE_OPEN_PACKAGE = "com.meshcore.meshcore_open"
+        val REGION_SHAPE = Regex("^[a-z0-9-]{1,30}$")
+    }
 
     private lateinit var app: RoadbeaconApplication
 
@@ -190,21 +198,41 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         val meshStatus = Preference(context).apply {
             title = "Status"
-            summary = app.meshClient?.state?.value?.let { state ->
-                when (state) {
-                    is MeshApiState.Connected ->
-                        "Connected to ${state.deviceName ?: "radio"}"
-                    is MeshApiState.WaitingForApproval ->
-                        "Waiting for approval in MeshCore Open"
-                    MeshApiState.NotApproved ->
-                        "Not approved in MeshCore Open (allow Roadbeacon there; retrying every 2 min)"
-                    is MeshApiState.Failed -> state.message
-                    MeshApiState.Connecting -> "Connecting…"
-                    MeshApiState.Disconnected -> "Off"
-                }
-            } ?: "Off"
+            summary = meshStatusText(app.meshClient?.state?.value)
         }
         meshCategory.addPreference(meshStatus)
+        // The client changes state on its own (radio gone, a prompt answered in MeshCore Open)
+        // and is replaced when the switch or URL changes, so follow whichever one is current.
+        viewLifecycleOwnerLiveData.observe(this) { owner ->
+            owner?.lifecycleScope?.launch {
+                owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    while (true) {
+                        meshStatus.summary = meshStatusText(app.meshClient?.state?.value)
+                        delay(1_000)
+                    }
+                }
+            }
+        }
+
+        val openMeshCore = Preference(context).apply {
+            title = "Open MeshCore Open"
+            summary = "Pair this app, connect the radio or add #roadstr there"
+            setOnPreferenceClickListener {
+                val launch = requireContext().packageManager
+                    .getLaunchIntentForPackage(MESHCORE_OPEN_PACKAGE)
+                if (launch == null) {
+                    android.widget.Toast.makeText(
+                        requireContext(),
+                        "MeshCore Open is not installed",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    startActivity(launch)
+                }
+                true
+            }
+        }
+        meshCategory.addPreference(openMeshCore)
 
         val meshEnabled = SwitchPreferenceCompat(context).apply {
             title = "Use MeshCore radio"
@@ -268,6 +296,29 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         meshCategory.addPreference(meshUrl)
 
+        val meshRegion = EditTextPreference(context).apply {
+            title = "Flood region"
+            summary = regionSummary(app.settings.meshRegion)
+            text = app.settings.meshRegion
+            dialogTitle = "Flood region (empty: the radio's own)"
+            setOnPreferenceChangeListener { pref, newValue ->
+                val region = (newValue as String).trim()
+                // MeshCore Open's region names; anything else it refuses with bad_request.
+                if (region.isNotEmpty() && !REGION_SHAPE.matches(region)) {
+                    android.widget.Toast.makeText(
+                        requireContext(),
+                        "Lowercase letters, digits and -, up to 30 characters",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnPreferenceChangeListener false
+                }
+                app.settings.meshRegion = region
+                (pref as EditTextPreference).summary = regionSummary(region)
+                true
+            }
+        }
+        meshCategory.addPreference(meshRegion)
+
         val meshSend = SwitchPreferenceCompat(context).apply {
             title = "Send my reports by radio"
             isChecked = app.settings.meshSendOwn
@@ -312,6 +363,31 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         preferenceScreen = screen
     }
+
+    private fun meshStatusText(state: MeshApiState?): String = when (state) {
+        null, MeshApiState.Disconnected -> "Off"
+        MeshApiState.Connecting -> "Connecting…"
+        MeshApiState.WaitingForApproval -> "Waiting for approval in MeshCore Open"
+        MeshApiState.NotApproved ->
+            "Not approved in MeshCore Open (allow Roadbeacon there; retrying every 2 min)"
+        is MeshApiState.Connected -> {
+            val connected = "Connected to ${state.deviceName ?: "radio"}"
+            if (state.unknownRegion == null) connected
+            else "$connected; MeshCore Open does not know flood region \"${state.unknownRegion}\", nothing is sent"
+        }
+        MeshApiState.NoRadio -> "MeshCore Open is not connected to the radio"
+        MeshApiState.WaitingForChannel -> "Waiting for you to allow in MeshCore Open"
+        MeshApiState.ChannelDenied -> "Add #roadstr in MeshCore Open"
+        is MeshApiState.ChannelMissing ->
+            "The radio has no #roadstr channel; add it in MeshCore Open" +
+                (state.code?.let { " ($it)" } ?: "")
+        is MeshApiState.Refused ->
+            "MeshCore Open refused the subscription (${state.code ?: "no answer"})"
+        is MeshApiState.Failed -> state.message
+    }
+
+    private fun regionSummary(region: String): String =
+        region.ifEmpty { "Empty: the radio's own flood scope" }
 
     private fun speedThresholdSummary(kmh: Int): String =
         "${UnitFormatter.formatSpeedKmh(kmh, app.settings.unitSystem)} · switch to wider geohash above this speed"

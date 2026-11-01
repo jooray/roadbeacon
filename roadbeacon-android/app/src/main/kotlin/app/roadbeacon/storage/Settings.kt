@@ -102,6 +102,14 @@ class Settings(context: Context) : MeshBridgeConfig {
         set(value) = prefs.edit().putBoolean(KEY_MESH_BRIDGE_TO_RADIO, value).apply()
 
     /**
+     * Flood region (scope) name passed with every radio send. Empty, the default: none is passed
+     * and MeshCore Open uses the radio's own flood scope.
+     */
+    var meshRegion: String
+        get() = prefs.getString(KEY_MESH_REGION, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_MESH_REGION, value).apply()
+
+    /**
      * MeshCore Open's receive time (ISO-8601) of the last radio datagram this app processed, sent
      * back as `since` so a reconnect replays what it missed. The server's clock, not ours.
      */
@@ -131,6 +139,7 @@ class Settings(context: Context) : MeshBridgeConfig {
         private const val KEY_MESH_BRIDGE_TO_NOSTR = "mesh_bridge_to_nostr"
         private const val KEY_MESH_BRIDGE_TO_RADIO = "mesh_bridge_to_radio"
         private const val KEY_MESH_CURSOR = "mesh_cursor"
+        private const val KEY_MESH_REGION = "mesh_region"
 
         const val DEFAULT_MESH_URL = "ws://127.0.0.1:8787/api/v1"
 
