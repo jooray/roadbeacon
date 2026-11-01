@@ -296,9 +296,6 @@ class MeshCoreApiClient(
     }
 
     private suspend fun subscribe(connection: Int) {
-        session.takeStaleSubscription()?.let { old ->
-            request("events.unsubscribe", buildJsonObject { put("subscriptionId", old) })
-        }
         val response = request(
             "events.subscribe",
             MeshApiSession.subscribeParams(channelName, RECEIVE_DATA_TYPES, settings.meshCursor)

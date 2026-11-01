@@ -114,19 +114,24 @@ After `hello` the client follows the radio rather than the socket (`MeshApiSessi
 decisions, `MeshApiSessionTest` checks them):
 
 1. `hello.device.connected` and the `device` message say whether MeshCore Open is connected to the
-   radio and has loaded its channels. MeshCore Open sends `device` unprompted whenever that changes
-   or the channel list changes; it carries `device` (as in `hello`) and `channels`.
+   radio and has loaded its channels. The initial state comes from `hello`; after it, MeshCore Open
+   sends `device` unprompted whenever that changes or the channel list changes. It carries `device`
+   (as in `hello`) and `channels`.
 2. Radio connected: `events.subscribe` with `channel: "#roadstr"`, `dataTypes: [0xFF52, 0x0150]` and
    `since` (the cursor). Not connected: no subscription; the status says so, the socket stays open,
    and the next `device` with `connected: true` subscribes.
-3. `device` with `connected: false` retires the subscription; the next one replays from the cursor
-   and the old one is unsubscribed first.
+3. A subscription stays in place while the radio is away and comes back. A `device` message with
+   `connected: true` subscribes only a connection that holds no subscription (the earlier one
+   failed or never happened); subscribing again would deliver every event twice (and a connection
+   may hold at most 16).
 4. `unknown_channel` while the radio is connected means the radio has no `#roadstr`. The client
    calls `channels.join {"name":"#roadstr"}` once per connection. MeshCore Open answers at once if
    the channel exists, otherwise asks the user (up to 2 minutes, with a notification when in the
    background), so this request waits 150 s instead of the usual 15 s. On success the client
    subscribes. On `denied` it shows "Add #roadstr in MeshCore Open" and does not ask again for
-   10 minutes, or until *Use MeshCore radio* is switched off and on.
+   10 minutes, or until *Use MeshCore radio* is switched off and on. Join errors: `invalid_params`
+   (the name must match `^#[a-z0-9-]{1,31}$`), `not_connected`, `denied`, `no_free_slot`,
+   `channel_conflict`, `rate_limited`, `pairing_pending`.
 5. A server that never sends `device` (an older MeshCore Open) gets a slow fallback: a connection
    left without a subscription reads `device.info` and subscribes again every 60 s.
 6. `channel.data` events carry `hops`: the flood hop count (`0` = heard from the sender's radio),
@@ -137,8 +142,8 @@ decisions, `MeshApiSessionTest` checks them):
 connecting the radio or adding the channel.
 
 Protocol, methods and errors: `documentation/LOCAL_API.md` in the MeshCore Open fork
-(`pr/local-api` branch; `device`, `channels.join` and `hops` are additions to protocol 1),
-upstream issue [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/issues/616).
+(jooray/meshcore-open, branch `feat/local-api`; `device`, `channels.join` and `hops` are
+additions to protocol 1), upstream issue [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/issues/616).
 
 ## Failure modes
 
@@ -149,7 +154,7 @@ upstream issue [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/
 | MeshCore Open not connected to the radio (`connected: false`, or `unknown_channel` while so) | "MeshCore Open is not connected to the radio"; socket kept, subscribes on the next `device` with `connected: true` |
 | channel `#roadstr` missing (`unknown_channel` while connected) | `channels.join` once per connection; "Waiting for you to allow in MeshCore Open" while the prompt is open |
 | user denies adding the channel | "Add #roadstr in MeshCore Open"; not asked again for 10 min or until the switch is toggled; a `device` listing `#roadstr` subscribes |
-| join fails otherwise (`no_free_slot`, `rate_limited`, …) | "The radio has no #roadstr channel; add it in MeshCore Open (code)" |
+| join fails otherwise (`no_free_slot`, `channel_conflict`, `rate_limited`, …) | "The radio has no #roadstr channel; add it in MeshCore Open (code)" |
 | subscription refused with another code | "MeshCore Open refused the subscription (code)" |
 | server without `device` messages | `device.info` and a new subscription every 60 s while unsubscribed |
 | flood region unknown to MeshCore Open (`unknown_region`) | sends refused; status names the region until a send goes through |
@@ -165,7 +170,8 @@ upstream issue [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/
 * Bridge: `MeshBridgeTest` (fake radio, signed vector events): verification, dedupe, parking,
   staleness, cursor, backlog, relay→radio area/hold/gap, receive limit.
 * Local API: server tests in MeshCore Open against a fake host; `MeshApiSessionTest` for the
-  client's decisions (radio state, join, denial pause, fallback retry, data types, region, hops).
+  client's decisions (radio state, one subscription per connection, join, denial pause, fallback
+  retry, data types, region, hops).
 * **Hardware: not tested.** No radio was available. The checklist is: pair a radio, create the
   channel, send a report A→B, compare event IDs, pull the BLE link mid-send, bridge offline→online,
   and record airtime with default limits.

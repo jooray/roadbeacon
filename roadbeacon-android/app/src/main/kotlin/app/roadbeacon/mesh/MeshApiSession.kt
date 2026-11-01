@@ -45,7 +45,9 @@ sealed interface MeshApiState {
  *  - `hello.device.connected` false, or a `device` message saying so: no radio, keep the socket
  *    and wait for the next `device` message;
  *  - radio connected: subscribe; a `device` message with the channel listed subscribes again
- *    after any failure or after the radio was gone;
+ *    only when this connection holds no subscription (one survives the radio going away; a
+ *    second would deliver every event twice). `device` is sent on changes after `hello`, so the
+ *    initial state comes from `hello.device`;
  *  - `unknown_channel` while the radio is connected: ask once per connection with
  *    `channels.join`, never within [DENIED_PAUSE_MS] of a refusal; then subscribe;
  *  - `unknown_channel` while it is not: no radio (without one MeshCore Open knows no channels);
@@ -69,7 +71,6 @@ internal class MeshApiSession(
     private var sendsDeviceMessages = false
     private var subscribed = false
     private var subscriptionId: String? = null
-    private var staleSubscriptionId: String? = null
     private var busy = false
     private var joinAsked = false
     private var unknownRegion: String? = null
@@ -85,7 +86,6 @@ internal class MeshApiSession(
         sendsDeviceMessages = false
         subscribed = false
         subscriptionId = null
-        staleSubscriptionId = null
         busy = false
         joinAsked = false
         unknownRegion = null
@@ -118,13 +118,7 @@ internal class MeshApiSession(
         val wasConnected = radioConnected
         radioConnected = connected
         if (!connected) {
-            if (subscribed) {
-                // The radio's queue was drained into MeshCore Open's archive meanwhile; the next
-                // subscription replays it from the cursor, so this one is retired then.
-                subscribed = false
-                staleSubscriptionId = subscriptionId
-                subscriptionId = null
-            }
+            // A subscription stays in place across the radio going away and coming back.
             state = MeshApiState.NoRadio
             return Action.None
         }
@@ -224,10 +218,6 @@ internal class MeshApiSession(
         }
         return startSubscribe()
     }
-
-    /** The subscription the radio outlived, to unsubscribe before subscribing again. */
-    @Synchronized
-    fun takeStaleSubscription(): String? = staleSubscriptionId.also { staleSubscriptionId = null }
 
     /** Records a `channel.sendData` answer; true when the datagram was queued. */
     @Synchronized

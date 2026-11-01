@@ -72,14 +72,13 @@ class MeshApiSessionTest {
     }
 
     @Test
-    fun `radio gone retires the subscription and the next one replaces it`() {
+    fun `radio gone and back keeps the one subscription`() {
         connectedAndSubscribed()
         assertEquals(Action.None, session.onDevice(device(false)))
         assertEquals(MeshApiState.NoRadio, session.state)
-        assertFalse(session.isSubscribed)
-        assertEquals(Action.Subscribe, session.onDevice(device(true, "#roadstr")))
-        assertEquals("s1", session.takeStaleSubscription())
-        assertNull(session.takeStaleSubscription())
+        assertTrue(session.isSubscribed)
+        assertEquals(Action.None, session.onDevice(device(true, "#roadstr")))
+        assertEquals(MeshApiState.Connected("JRJ-nomad"), session.state)
     }
 
     @Test
