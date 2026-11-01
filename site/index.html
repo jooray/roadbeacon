@@ -61,7 +61,7 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
   <h2 id="how">How it works</h2>
   <ol class="steps">
     <li><strong>Report.</strong> A driver picks a category (police, accident, road closure, construction, hazard and others). The app builds a Nostr event with the position, a geohash and an expiry time, and signs it with the driver's key. The key can be a persistent identity or an ephemeral one.</li>
-    <li><strong>Share.</strong> The signed event is published to Nostr relays. It can also travel as a compact binary message over MeshCore LoRa mesh networks (experimental, through a MeshCore Open build with the local API).</li>
+    <li><strong>Share.</strong> The signed event is published to Nostr relays. It can also travel as a compact binary message over MeshCore LoRa mesh networks (experimental, through a MeshCore Open build with the local API: <a href="meshcore-local-api.html">how it works and how to test it</a>).</li>
     <li><strong>See and confirm.</strong> Other drivers query relays by geohash and see the reports as markers on the map. They can confirm "still there" or deny "no longer there". Reports expire by type, for example after 1 hour for traffic jams and 30 days for speed cameras.</li>
   </ol>
   <figure>
