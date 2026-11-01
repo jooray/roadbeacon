@@ -347,14 +347,19 @@ protocol), with:
 
 - channel: `#roadstr` (key = first 16 bytes of `SHA-256("#roadstr")` =
   `b7f4317db7b03aeb563b2c4bdc476d6a`) — a public channel by construction, not a privacy feature;
-- `data_type`: `0xFF52` (inside the firmware's unregistered testing range) until a stable value is
-  registered with MeshCore in `0100–FEFF`;
+- `data_type`: `0x0150` ("Road Events") is requested in MeshCore's registry
+  (`docs/number_allocations.md`). Until that allocation is merged, senders use `0xFF52` (the
+  firmware's development range `FF00–FFFF`); afterwards they send `0x0150`. Receivers accept both
+  values, and keep accepting `0xFF52` for a while after the switch;
 - payload: 117–163 bytes for a report (up to 165 accepted), 134 for a vote. A comment longer than
   46 bytes keeps a report relay-only; radio-first clients should keep comments short.
 
+A sender uses the radio's own flood scope (region) by default. Narrowing it to a named region is a
+local choice of the sending node; it changes which repeaters forward the datagram, not its bytes.
+
 Rate limits, de-duplication and bridge consent are part of any implementation's obligations: a
 report is 117–163 bytes, roughly 0.6–0.9 s of airtime at SF9/125 kHz, so a misbehaving bridge is a
-channel-wide problem. The operational details — topology, the `#roadstr` channel, `0xFF52`, the
+channel-wide problem. The operational details — topology, the `#roadstr` channel, the data types, the
 one-BLE-owner local API and the bridge limits — are in
 [`docs/meshcore.md`](../docs/meshcore.md).
 

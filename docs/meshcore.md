@@ -29,13 +29,16 @@ keeps working while reports flow.
 |---|---|
 | Channel | `#roadstr` (a MeshCore hashtag channel) |
 | Channel key | first 16 bytes of `SHA-256("#roadstr")` = `b7f4317db7b03aeb563b2c4bdc476d6a` |
-| `data_type` | `0xFF52` |
+| `data_type` sent | `0xFF52` until MeshCore merges `0x0150`, then `0x0150` |
+| `data_type` received | `0xFF52` and `0x0150` |
 | Payload | exactly one frame: 117–163 bytes (report; up to 165 accepted) or 134 bytes (vote) |
 
 The channel is public: anyone who knows the name can derive the key. It is a shared meeting point,
-not a privacy feature. `0xFF52` lives in the firmware's unregistered testing range; a stable value
-in `0100–FEFF` should be registered with MeshCore once hardware validation is done, with both apps
-named in the request.
+not a privacy feature. `0xFF52` lives in the firmware's development range (`FF00–FFFF`).
+`0x0150` "Road Events" is requested in MeshCore's registry (`docs/number_allocations.md`), with
+both apps named. Until it is merged, clients send `0xFF52` and receive both; after the merge the
+send value switches to `0x0150` (one constant, `SEND_DATA_TYPE` in `MeshCoreApiClient`) and
+`0xFF52` is still received for a while, so old and new senders hear each other.
 
 ## Sending
 
@@ -43,7 +46,10 @@ named in the request.
    `BinaryCodec.encodeReport` / `encodeConfirmation`; encoding refuses anything that would not
    rebuild byte for byte, a comment over 46 bytes, and a comment with control characters.
 2. The frame goes out as one channel-data datagram (`0x3E` on the companion protocol) via the local
-   API's `channel.sendData`, or directly when a client owns BLE.
+   API's `channel.sendData`, or directly when a client owns BLE. Without a `region` MeshCore Open
+   applies the channel's or the radio's own flood scope, which is the default. Roadbeacon passes
+   `region` only when *Settings → MeshCore → Flood region* is set; MeshCore Open refuses a name it
+   does not know (`unknown_region`) rather than send a flood no repeater forwards.
 3. The radio acknowledges the **command**; that is not delivery. There is no delivery receipt for
    flood traffic.
 4. Limit: 163 bytes per datagram through BLE and the local API (165 on the radio itself), which is
@@ -104,18 +110,50 @@ other host) and tokenless:
 * pairing can be revoked in MeshCore Open, which ends the live session (close 4003). A refused or
   revoked client retries every 2 minutes and shows "Not approved".
 
+After `hello` the client follows the radio rather than the socket (`MeshApiSession` holds the
+decisions, `MeshApiSessionTest` checks them):
+
+1. `hello.device.connected` and the `device` message say whether MeshCore Open is connected to the
+   radio and has loaded its channels. MeshCore Open sends `device` unprompted whenever that changes
+   or the channel list changes; it carries `device` (as in `hello`) and `channels`.
+2. Radio connected: `events.subscribe` with `channel: "#roadstr"`, `dataTypes: [0xFF52, 0x0150]` and
+   `since` (the cursor). Not connected: no subscription; the status says so, the socket stays open,
+   and the next `device` with `connected: true` subscribes.
+3. `device` with `connected: false` retires the subscription; the next one replays from the cursor
+   and the old one is unsubscribed first.
+4. `unknown_channel` while the radio is connected means the radio has no `#roadstr`. The client
+   calls `channels.join {"name":"#roadstr"}` once per connection. MeshCore Open answers at once if
+   the channel exists, otherwise asks the user (up to 2 minutes, with a notification when in the
+   background), so this request waits 150 s instead of the usual 15 s. On success the client
+   subscribes. On `denied` it shows "Add #roadstr in MeshCore Open" and does not ask again for
+   10 minutes, or until *Use MeshCore radio* is switched off and on.
+5. A server that never sends `device` (an older MeshCore Open) gets a slow fallback: a connection
+   left without a subscription reads `device.info` and subscribes again every 60 s.
+6. `channel.data` events carry `hops`: the flood hop count (`0` = heard from the sender's radio),
+   `null` for a direct path or an own send. Roadbeacon keeps it with the datagram and does not show
+   it yet.
+
+*Settings → MeshCore → Open MeshCore Open* launches `com.meshcore.meshcore_open` for pairing,
+connecting the radio or adding the channel.
+
 Protocol, methods and errors: `documentation/LOCAL_API.md` in the MeshCore Open fork
-(`feat/local-api` branch), upstream issue
-[zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/issues/616).
+(`pr/local-api` branch; `device`, `channels.join` and `hops` are additions to protocol 1),
+upstream issue [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/issues/616).
 
 ## Failure modes
 
 | Situation | Behaviour |
 |---|---|
-| API not running / radio disconnected | own events wait in the backlog; the client reconnects with backoff (5 s … 60 s) |
+| API not running | own events wait in the backlog; the client reconnects with backoff (5 s … 60 s) |
 | pairing refused or revoked | "Not approved", retry every 2 min |
+| MeshCore Open not connected to the radio (`connected: false`, or `unknown_channel` while so) | "MeshCore Open is not connected to the radio"; socket kept, subscribes on the next `device` with `connected: true` |
+| channel `#roadstr` missing (`unknown_channel` while connected) | `channels.join` once per connection; "Waiting for you to allow in MeshCore Open" while the prompt is open |
+| user denies adding the channel | "Add #roadstr in MeshCore Open"; not asked again for 10 min or until the switch is toggled; a `device` listing `#roadstr` subscribes |
+| join fails otherwise (`no_free_slot`, `rate_limited`, …) | "The radio has no #roadstr channel; add it in MeshCore Open (code)" |
+| subscription refused with another code | "MeshCore Open refused the subscription (code)" |
+| server without `device` messages | `device.info` and a new subscription every 60 s while unsubscribed |
+| flood region unknown to MeshCore Open (`unknown_region`) | sends refused; status names the region until a send goes through |
 | firmware without channel data | MeshCore Open answers `unsupported_firmware`; nothing is sent |
-| channel `#roadstr` missing | subscribe fails, status says so; create the channel in MeshCore Open |
 | duplicate frames | dropped by event ID |
 | signature invalid | dropped before display or forwarding |
 | clock far in the future | dropped |
@@ -126,7 +164,8 @@ Protocol, methods and errors: `documentation/LOCAL_API.md` in the MeshCore Open 
   Roadstr runs the same file.
 * Bridge: `MeshBridgeTest` (fake radio, signed vector events): verification, dedupe, parking,
   staleness, cursor, backlog, relay→radio area/hold/gap, receive limit.
-* Local API: server tests in MeshCore Open against a fake host.
+* Local API: server tests in MeshCore Open against a fake host; `MeshApiSessionTest` for the
+  client's decisions (radio state, join, denial pause, fallback retry, data types, region, hops).
 * **Hardware: not tested.** No radio was available. The checklist is: pair a radio, create the
   channel, send a report A→B, compare event IDs, pull the BLE link mid-send, bridge offline→online,
   and record airtime with default limits.
