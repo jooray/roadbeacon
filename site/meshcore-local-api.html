@@ -39,6 +39,12 @@ ol.steps li{margin:.6rem 0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:.75rem;padding:1rem 1.25rem;margin:1rem 0}
 .card ul{margin:.25rem 0;padding-left:1.2rem}
 pre.diagram{background:var(--card);border:1px solid var(--line);border-radius:.75rem;padding:1rem;overflow-x:auto;font:.8rem/1.35 ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:1.5rem 0}
+figure img{max-width:100%;height:auto;border-radius:.6rem;border:1px solid var(--line);display:block}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:.4rem}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:1rem;align-items:start}
+.shots figure{margin:0}
+.narrow{max-width:26rem}
 code{font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
 footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
 </style>
@@ -83,8 +89,13 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
   <h2 id="choices">Design choices</h2>
   <p>The local API is off until you switch it on, and it only listens on <code>127.0.0.1</code>. It refuses browsers, so a web page can't reach your radio through it.</p>
   <p>Each app needs your permission once. The app holds a key and proves it on every connection. The first time, MeshCore Open asks "Allow Roadstr to connect?" and shows the key's fingerprint, which you can compare with the one the app shows. You don't copy any token, and you can revoke an app in MeshCore Open's settings.</p>
+  <div class="shots">
+    <figure><picture><source srcset="img/meshcore/pair-dialog.webp" type="image/webp"><img src="img/meshcore/pair-dialog.png" width="719" height="805" alt="MeshCore Open dialog: Allow connection? Roadbeacon wants to send and receive MeshCore messages through this app. Key fingerprint 03EB 90A7 DA16 A25C. Deny or Allow." loading="lazy"></picture><figcaption>The first time an app connects, MeshCore Open asks.</figcaption></figure>
+    <figure><picture><source srcset="img/meshcore/local-api-settings.webp" type="image/webp"><img src="img/meshcore/local-api-settings.png" width="719" height="1173" alt="MeshCore Open Local API settings: the API switched on, its address, and two allowed apps, Roadstr and Roadbeacon, each with a key fingerprint and pairing date." loading="lazy"></picture><figcaption>Settings → Local API: the allowed apps, which you can remove.</figcaption></figure>
+  </div>
   <p>When MeshCore Open loses the radio, it tells the connected apps. They show that the radio is gone, wait, and carry on by themselves when it's back.</p>
   <p>Road events travel on the hashtag channel <code>#roadstr</code>. A hashtag channel's key comes from its name, so an app can ask MeshCore Open to add the channel without sending any secret; you confirm it in a dialog. Anyone can read the channel, and that's intended. Every report carries its author's signature, so anyone can check it, and nobody can post a report in someone else's name.</p>
+  <figure class="narrow"><picture><source srcset="img/meshcore/join-dialog.webp" type="image/webp"><img src="img/meshcore/join-dialog.png" width="720" height="565" alt="MeshCore Open dialog: Add a channel? Roadbeacon wants to add the hashtag channel #roadstr to your radio. Anyone who knows a hashtag channel's name can read it and post in it. Deny or Add." loading="lazy"></picture><figcaption>When the node has no #roadstr channel, the road app asks for it.</figcaption></figure>
   <p>Reports go out as MeshCore channel data, not as chat text, so chat clients that don't know the format never display them. MeshCore keeps a registry of data types, and Road Events has asked for <code>0x0150</code> (<a href="https://github.com/meshcore-dev/MeshCore/pull/3750">MeshCore#3750</a>). Until it's granted, the apps send the development value <code>0xFF52</code> and listen on both.</p>
   <p>A report is 117 to 163 bytes and a vote is 134, so each fits in one LoRa packet and nothing gets split up. Sends wait for a quiet radio like chat messages do, and the bridges between radio and relays have hourly limits.</p>
   <p>The API is a proposal to MeshCore Open (<a href="https://github.com/zjs81/meshcore-open/issues/616">#616</a>). The reference is <a href="https://github.com/jooray/meshcore-open/blob/test/localapi-2/documentation/LOCAL_API.md">LOCAL_API.md</a>, and the radio side of road events is described in <a href="https://github.com/jooray/roadbeacon/blob/main/docs/meshcore.md">docs/meshcore.md</a>.</p>
@@ -111,6 +122,10 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
     <li>Turn internet off and report something on one phone, with a short comment. It should appear on the other phone, heard from the radio. Try it in both directions, and if you can, with Roadstr on one phone and Roadbeacon on the other. Try a vote too, and check that chat still works.</li>
     <li>Turn the node off and on again. The road app should notice and recover by itself.</li>
   </ol>
+  <div class="shots">
+    <figure><picture><source srcset="img/meshcore/roadstr-meshcore-settings.webp" type="image/webp"><img src="img/meshcore/roadstr-meshcore-settings.png" width="720" height="1373" alt="Roadstr settings, MeshCore section: Use the radio through MeshCore Open is on, the key MeshCore Open should show, status Connected and ready, Receive and Send switched on, both bridges off." loading="lazy"></picture><figcaption>Roadstr's MeshCore settings once it's connected and ready.</figcaption></figure>
+    <figure><picture><source srcset="img/meshcore/roadstr-map.webp" type="image/webp"><img src="img/meshcore/roadstr-map.jpg" width="719" height="1133" alt="Roadstr map of the old town of Košice around Hlavná street." loading="lazy"></picture><figcaption>Roadstr's map. Reports heard on the radio appear here like any other.</figcaption></figure>
+  </div>
   <p>The full checklist, and what has already been tested, are in the <a href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-2">release notes</a>. A report going from one radio to another hasn't been confirmed yet. If you try it, tell us how it went: open an issue for <a href="https://github.com/jooray/roadbeacon/issues">Roadbeacon</a>, <a href="https://github.com/jooray/meshcore-open/issues">MeshCore Open's local API</a> or <a href="https://github.com/roadstrapp/roadstr-app/issues">Roadstr</a>, or write on Nostr.</p>
 </section>
 </main>
