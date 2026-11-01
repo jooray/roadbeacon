@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>One radio, many apps: road events over MeshCore</title>
-<meta name="description" content="Why Roadbeacon and Roadstr reach a MeshCore radio through MeshCore Open's local API, how it works, and how to test it.">
+<meta name="description" content="How Roadbeacon and Roadstr share a MeshCore node with chat through MeshCore Open's local API, and how to test it.">
 <meta name="theme-color" content="#474DD3">
 <link rel="canonical" href="https://jooray.github.io/roadbeacon/meshcore-local-api.html">
 <meta property="og:title" content="One radio, many apps: road events over MeshCore">
@@ -48,62 +48,69 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
 <header class="hero"><div class="wrap">
   <a class="back" href="./">← Roadbeacon</a>
   <h1>One radio, many apps: road events over MeshCore</h1>
-  <p class="lead">Roadbeacon and Roadstr can now send and receive road reports over a MeshCore LoRa radio without taking it away from chat. Here is why it is built this way, and how you can help test it.</p>
+  <p class="lead">Roadbeacon and Roadstr can now send and receive road reports over a MeshCore LoRa radio while you keep chatting on it. This is how it works, why it's built this way, and how to help test it.</p>
   <p class="meta">1 November 2026 · Experimental</p>
 </div></header>
 <main id="main" class="wrap">
 
 <section aria-labelledby="problem">
-  <h2 id="problem">The problem: one radio, one app</h2>
-  <p>A MeshCore companion radio talks to exactly one phone app at a time, over one Bluetooth connection. Usually that app is a chat client such as MeshCore Open. If a road-event app wants the radio, it has to take the connection over, and then chat stops working. So you would have to choose: either you chat with your node, or you send and receive road reports.</p>
-  <p>That makes MeshCore a single-app network on a phone, and every new app would need its own copy of the companion protocol.</p>
+  <h2 id="problem">One node, one app</h2>
+  <p>A MeshCore companion node takes one Bluetooth connection at a time. If you have one node, only one app on your phone can talk to it. Usually that app is a chat client such as MeshCore Open. A road-event app that wants the node has to take the connection away, and then chat stops working. So you have to choose between chatting with your node and sending and receiving road reports.</p>
 </section>
 
 <section aria-labelledby="reticulum">
-  <h2 id="reticulum">The idea, borrowed from Reticulum</h2>
-  <p><a href="https://reticulum.network/">Reticulum</a> solved this long ago. One daemon, <code>rnsd</code>, owns the radio interfaces, and every program on the machine reaches the network through it. That is how one device ends up with a whole set of apps (messengers, file transfer, sensors, bridges) sharing one radio, none of them owning it.</p>
-  <p>The same split works for MeshCore. MeshCore Open keeps its one connection to the companion radio and becomes the daemon. A small <strong>local API</strong> lets other apps on the same phone subscribe to the traffic they care about and send through that connection:</p>
-<pre class="diagram" role="img" aria-label="Roadstr and Roadbeacon connect to MeshCore Open over a local WebSocket; MeshCore Open holds the only Bluetooth link to the radio, which talks LoRa to other radios.">
+  <h2 id="reticulum">The fix, borrowed from Reticulum</h2>
+  <p><a href="https://reticulum.network/">Reticulum</a> solved this a long time ago. One daemon, <code>rnsd</code>, holds the radio interfaces, and every program on the machine reaches the network through it. That's why a single device can run messengers, file transfer, sensors and bridges side by side on one radio.</p>
+  <p>MeshCore can work the same way. MeshCore Open keeps its one connection to the node and acts as the daemon. A small local API lets other apps on the same phone subscribe to the traffic they care about and send through that connection:</p>
+<pre class="diagram" role="img" aria-label="Roadstr or Roadbeacon connects to MeshCore Open over a local WebSocket; MeshCore Open holds the only Bluetooth link to the radio, which talks LoRa to other radios.">
  Roadstr ─────┐
-              │  ws://127.0.0.1:8787   ┌───────────────┐   BLE   ┌───────┐   LoRa
+   or         │  ws://127.0.0.1:8787   ┌───────────────┐   BLE   ┌───────┐   LoRa
  Roadbeacon ──┼───────────────────────►│ MeshCore Open │◄───────►│ radio │◄────────► mesh
               │   (local API)          │  (chat UI)    │         └───────┘
- next app ────┘                        └───────────────┘
+ other apps ──┘                        └───────────────┘
 </pre>
-  <p>The radio protocol does not change, the firmware does not change, and nothing leaves the phone except what goes over LoRa.</p>
+  <p>The radio protocol and the firmware stay as they are. Nothing leaves the phone except what goes out over LoRa.</p>
+</section>
+
+<section aria-labelledby="apps">
+  <h2 id="apps">Roadstr or Roadbeacon: pick one</h2>
+  <p>You need one of the two road apps, not both. They speak the <a href="https://github.com/jooray/roadbeacon/blob/main/nips/road-events.md">same format</a> and pass the same test vectors, so a report made in one shows up in the other, over the radio and over Nostr relays.</p>
+  <p>The difference is the map. Roadbeacon is a plugin for <a href="https://osmand.net/">OsmAnd</a>: if you already navigate with OsmAnd, reports appear there. <a href="https://github.com/roadstrapp/roadstr-app">Roadstr</a> is its own maps and navigation app, by a different author.</p>
 </section>
 
 <section aria-labelledby="choices">
-  <h2 id="choices">Why it is built this way</h2>
-  <ul>
-    <li><strong>Off by default, loopback only.</strong> MeshCore Open opens no port until you switch the local API on. It only listens on <code>127.0.0.1</code>, and it refuses browsers, so a web page can't reach your radio.</li>
-    <li><strong>You allow each app once.</strong> An app proves a key it holds. The first time it connects, MeshCore Open asks “Allow Roadstr to connect?” and shows the key's fingerprint, which you can compare with the one in the app. There is no token to copy, and you can revoke an app at any time.</li>
-    <li><strong>Apps follow the radio.</strong> When MeshCore Open loses the radio, it tells the apps, which say so and wait. When the radio is back, they resume on their own.</li>
-    <li><strong>The channel is a hashtag channel.</strong> Road events travel on <code>#roadstr</code>. A hashtag channel's key is derived from its name, so an app can ask MeshCore Open to add it without any secret crossing the API. You confirm it in a dialog. The channel is public on purpose: every report carries its author's signature, so anyone can verify it, and nobody can forge a report in someone else's name.</li>
-    <li><strong>Its own data type.</strong> Reports are sent as MeshCore channel <em>data</em>, not chat text, so a chat client that doesn't know them never shows them. MeshCore keeps a registry of data types; Road Events asked for <code>0x0150</code> (<a href="https://github.com/meshcore-dev/MeshCore/pull/3750">MeshCore#3750</a>). Until it's granted, the apps send the development value <code>0xFF52</code> and listen on both.</li>
-    <li><strong>One packet per report.</strong> A report is 117 to 163 bytes and a vote 134, always a single LoRa packet. Nothing is chunked. Sends go through MeshCore Open's normal quiet-wait and pacing, and the bridges have strict hourly limits.</li>
-    <li><strong>Two independent apps.</strong> Roadstr, a navigation app, and Roadbeacon, an OsmAnd plugin, implement the <a href="https://github.com/jooray/roadbeacon/blob/main/nips/road-events.md">same format</a>, checked by the same test vectors. A report made in one shows up in the other, over the radio as well as over Nostr relays.</li>
-  </ul>
-  <p>The API is a proposal to MeshCore Open (<a href="https://github.com/zjs81/meshcore-open/issues/616">#616</a>). Its reference is <a href="https://github.com/jooray/meshcore-open/blob/test/localapi-2/documentation/LOCAL_API.md">LOCAL_API.md</a>; the radio side of road events is in <a href="https://github.com/jooray/roadbeacon/blob/main/docs/meshcore.md">docs/meshcore.md</a>.</p>
+  <h2 id="choices">Design choices</h2>
+  <p>The local API is off until you switch it on, and it only listens on <code>127.0.0.1</code>. It refuses browsers, so a web page can't reach your radio through it.</p>
+  <p>Each app needs your permission once. The app holds a key and proves it on every connection. The first time, MeshCore Open asks "Allow Roadstr to connect?" and shows the key's fingerprint, which you can compare with the one the app shows. You don't copy any token, and you can revoke an app in MeshCore Open's settings.</p>
+  <p>When MeshCore Open loses the radio, it tells the connected apps. They show that the radio is gone, wait, and carry on by themselves when it's back.</p>
+  <p>Road events travel on the hashtag channel <code>#roadstr</code>. A hashtag channel's key comes from its name, so an app can ask MeshCore Open to add the channel without sending any secret; you confirm it in a dialog. Anyone can read the channel, and that's intended. Every report carries its author's signature, so anyone can check it, and nobody can post a report in someone else's name.</p>
+  <p>Reports go out as MeshCore channel data, not as chat text, so chat clients that don't know the format never display them. MeshCore keeps a registry of data types, and Road Events has asked for <code>0x0150</code> (<a href="https://github.com/meshcore-dev/MeshCore/pull/3750">MeshCore#3750</a>). Until it's granted, the apps send the development value <code>0xFF52</code> and listen on both.</p>
+  <p>A report is 117 to 163 bytes and a vote is 134, so each fits in one LoRa packet and nothing gets split up. Sends wait for a quiet radio like chat messages do, and the bridges between radio and relays have hourly limits.</p>
+  <p>The API is a proposal to MeshCore Open (<a href="https://github.com/zjs81/meshcore-open/issues/616">#616</a>). The reference is <a href="https://github.com/jooray/meshcore-open/blob/test/localapi-2/documentation/LOCAL_API.md">LOCAL_API.md</a>, and the radio side of road events is described in <a href="https://github.com/jooray/roadbeacon/blob/main/docs/meshcore.md">docs/meshcore.md</a>.</p>
 </section>
 
 <section aria-labelledby="test">
   <h2 id="test">How to test it</h2>
-  <p>You need an Android phone and a MeshCore companion radio with firmware 1.15 or newer. Two phones and two radios are better.</p>
+  <p>You need an Android phone and a MeshCore companion node with firmware 1.15 or newer. Two phones with two nodes are much better, because the main thing to test is a report going from one radio to the other.</p>
   <div class="btns">
     <a class="btn" href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-2">MeshCore Open and Roadstr test builds</a>
     <a class="btn alt" href="https://zapstore.dev/apps/app.roadbeacon">Roadbeacon on Zapstore</a>
   </div>
   <div class="card">
-    <p><strong>Before you install:</strong> the test build of MeshCore Open replaces the official app and can't be installed over it. Uninstalling the official app deletes its contacts, channels and chat history, so note your channels first. The Roadstr test build installs next to the regular Roadstr. Roadbeacon is a normal release: <a href="https://zapstore.dev/apps/app.roadbeacon">Zapstore</a> or <a href="https://github.com/jooray/roadbeacon/releases/latest">GitHub</a>, 0.5.1 or newer.</p>
+    <p><strong>Before you install:</strong> the MeshCore Open test build replaces the official app and can't be installed over it. Uninstalling the official app deletes its contacts, channels and chat history, so write down your channels first. The Roadstr test build installs next to the regular Roadstr. Roadbeacon is a normal release, 0.5.1 or newer, from <a href="https://zapstore.dev/apps/app.roadbeacon">Zapstore</a> or <a href="https://github.com/jooray/roadbeacon/releases/latest">GitHub</a>.</p>
   </div>
   <ol class="steps">
-    <li><strong>MeshCore Open:</strong> install the test build and connect to your radio. The local API is already on in this build.</li>
-    <li><strong>Roadstr:</strong> in <em>Settings → MeshCore</em>, turn on <em>Use the radio through MeshCore Open</em>, then <em>Receive</em> and <em>Send</em>. Tap <em>Allow in MeshCore Open</em> and confirm there. If the radio has no <code>#roadstr</code> channel, MeshCore Open asks to add it.</li>
-    <li><strong>Roadbeacon:</strong> in <em>Settings → MeshCore</em>, turn on <em>Use MeshCore radio</em> and allow it in MeshCore Open. Then turn on sending and showing reports heard on the radio.</li>
-    <li><strong>Test:</strong> with internet off, report something on one phone, keeping the comment short. It should appear on the other phone from the radio. Try both directions and both apps, try votes, and check that chat still works. Turn the radio off and on: the apps should recover by themselves.</li>
+    <li>Install the MeshCore Open test build and connect it to your node. The local API is already on in this build.</li>
+    <li>Install one road app and set it up.
+      <ul>
+        <li>Roadstr: in <em>Settings → MeshCore</em>, turn on <em>Use the radio through MeshCore Open</em>, then <em>Receive</em> and <em>Send</em>. Tap <em>Allow in MeshCore Open</em> and confirm there.</li>
+        <li>Roadbeacon: in <em>Settings → MeshCore</em>, turn on <em>Use MeshCore radio</em> and allow it in MeshCore Open. Then turn on sending, and showing reports heard on the radio.</li>
+      </ul>
+      If your node has no <code>#roadstr</code> channel, MeshCore Open asks whether to add it.</li>
+    <li>Turn internet off and report something on one phone, with a short comment. It should appear on the other phone, heard from the radio. Try it in both directions, and if you can, with Roadstr on one phone and Roadbeacon on the other. Try a vote too, and check that chat still works.</li>
+    <li>Turn the node off and on again. The road app should notice and recover by itself.</li>
   </ol>
-  <p>The full checklist and what is already known are in the <a href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-2">release notes</a>. The one thing not yet confirmed is the most important one: a report going from one radio to another. If you try it, please tell us what happened, in an issue on <a href="https://github.com/jooray/roadbeacon/issues">Roadbeacon</a>, <a href="https://github.com/jooray/meshcore-open/issues">MeshCore Open (local API)</a> or <a href="https://github.com/roadstrapp/roadstr-app/issues">Roadstr</a>, or on Nostr.</p>
+  <p>The full checklist, and what has already been tested, are in the <a href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-2">release notes</a>. A report going from one radio to another hasn't been confirmed yet. If you try it, tell us how it went: open an issue for <a href="https://github.com/jooray/roadbeacon/issues">Roadbeacon</a>, <a href="https://github.com/jooray/meshcore-open/issues">MeshCore Open's local API</a> or <a href="https://github.com/roadstrapp/roadstr-app/issues">Roadstr</a>, or write on Nostr.</p>
 </section>
 </main>
 <footer><div class="wrap">
