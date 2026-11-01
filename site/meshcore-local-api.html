@@ -62,13 +62,14 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
   <h2 id="reticulum">The fix, borrowed from Reticulum</h2>
   <p><a href="https://reticulum.network/">Reticulum</a> solved this a long time ago. One daemon, <code>rnsd</code>, holds the radio interfaces, and every program on the machine reaches the network through it. That's why a single device can run messengers, file transfer, sensors and bridges side by side on one radio.</p>
   <p>MeshCore can work the same way. MeshCore Open keeps its one connection to the node and acts as the daemon. A small local API lets other apps on the same phone subscribe to the traffic they care about and send through that connection:</p>
-<pre class="diagram" role="img" aria-label="Roadstr or Roadbeacon connects to MeshCore Open over a local WebSocket; MeshCore Open holds the only Bluetooth link to the radio, which talks LoRa to other radios.">
- Roadstr ─────┐
-   or         │  ws://127.0.0.1:8787   ┌───────────────┐   BLE   ┌───────┐   LoRa
- Roadbeacon ──┼───────────────────────►│ MeshCore Open │◄───────►│ radio │◄────────► mesh
-              │   (local API)          │  (chat UI)    │         └───────┘
- other apps ──┘                        └───────────────┘
+<pre class="diagram" role="img" aria-label="Roadstr or Roadbeacon, and any other app, connect to MeshCore Open over a local WebSocket; MeshCore Open holds the only Bluetooth link to the radio, which talks LoRa to other radios.">
+ Roadstr or ──┐
+ Roadbeacon   │  ws://127.0.0.1:8787   ┌───────────────┐   BLE   ┌───────┐   LoRa
+ next app ────┼───────────────────────►│ MeshCore Open │◄───────►│ radio │◄────────► mesh
+ another app ─┘   (local API)          │  (chat UI)    │         └───────┘
+                                       └───────────────┘
 </pre>
+  <p>Nothing in the API is specific to road events. An app picks a channel and a data type and gets its own traffic, so a sensor logger, a bot, or an app that opens a door over the mesh can share the node with chat in the same way.</p>
   <p>The radio protocol and the firmware stay as they are. Nothing leaves the phone except what goes out over LoRa.</p>
 </section>
 
