@@ -347,10 +347,9 @@ protocol), with:
 
 - channel: `#roadstr` (key = first 16 bytes of `SHA-256("#roadstr")` =
   `b7f4317db7b03aeb563b2c4bdc476d6a`) — a public channel by construction, not a privacy feature;
-- `data_type`: `0x0150` ("Road Events") is requested in MeshCore's registry
-  (`docs/number_allocations.md`). Until that allocation is merged, senders use `0xFF52` (the
-  firmware's development range `FF00–FFFF`); afterwards they send `0x0150`. Receivers accept both
-  values, and keep accepting `0xFF52` for a while after the switch;
+- `data_type`: `0x0150` ("Road Events"), allocated in MeshCore's registry
+  (`docs/number_allocations.md`). Senders use it and receivers accept only it. The development
+  value `0xFF52`, used by test builds before the allocation, must not be sent and is not accepted;
 - payload: 117–163 bytes for a report (up to 165 accepted), 134 for a vote. A comment longer than
   46 bytes keeps a report relay-only; radio-first clients should keep comments short.
 

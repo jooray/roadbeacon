@@ -220,22 +220,28 @@ class MeshApiSessionTest {
     }
 
     @Test
-    fun `send params carry the region only when set`() {
-        val bytes = byteArrayOf(1, 2, 3)
-        val without = MeshApiSession.sendParams("#roadstr", 0xFF52, bytes, null)
-        assertFalse(without.containsKey("region"))
-        assertEquals("AQID", without["payload"]!!.jsonPrimitive.content)
-        assertEquals(0xFF52, without["dataType"]!!.jsonPrimitive.content.toInt())
-        assertFalse(MeshApiSession.sendParams("#roadstr", 0xFF52, bytes, "").containsKey("region"))
-        assertEquals("sk-ba", MeshApiSession.sendParams("#roadstr", 0xFF52, bytes, "sk-ba")["region"]!!.jsonPrimitive.content)
+    fun `Road Events is the data type sent and the only one received`() {
+        assertEquals(0x0150, MeshCoreApiClient.SEND_DATA_TYPE)
+        assertEquals(listOf(0x0150), MeshCoreApiClient.RECEIVE_DATA_TYPES)
     }
 
     @Test
-    fun `subscription asks for both data types`() {
-        val params = MeshApiSession.subscribeParams("#roadstr", listOf(0xFF52, 0x0150), "2026-11-01T10:00:00.000Z")
-        assertEquals("""[65362,336]""", params["dataTypes"].toString())
+    fun `send params carry the region only when set`() {
+        val bytes = byteArrayOf(1, 2, 3)
+        val without = MeshApiSession.sendParams("#roadstr", 0x0150, bytes, null)
+        assertFalse(without.containsKey("region"))
+        assertEquals("AQID", without["payload"]!!.jsonPrimitive.content)
+        assertEquals(0x0150, without["dataType"]!!.jsonPrimitive.content.toInt())
+        assertFalse(MeshApiSession.sendParams("#roadstr", 0x0150, bytes, "").containsKey("region"))
+        assertEquals("sk-ba", MeshApiSession.sendParams("#roadstr", 0x0150, bytes, "sk-ba")["region"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `subscription asks for Road Events`() {
+        val params = MeshApiSession.subscribeParams("#roadstr", MeshCoreApiClient.RECEIVE_DATA_TYPES, "2026-11-01T10:00:00.000Z")
+        assertEquals("""[336]""", params["dataTypes"].toString())
         assertEquals("2026-11-01T10:00:00.000Z", params["since"]!!.jsonPrimitive.content)
-        assertFalse(MeshApiSession.subscribeParams("#roadstr", listOf(0xFF52), null).containsKey("since"))
+        assertFalse(MeshApiSession.subscribeParams("#roadstr", listOf(0x0150), null).containsKey("since"))
     }
 
     private fun event(dataType: Int, hops: String = "2", outgoing: Boolean = false, channel: String = "#roadstr") = json(
@@ -244,9 +250,9 @@ class MeshApiSessionTest {
     )
 
     @Test
-    fun `datagrams of either data type are read, with hops`() {
-        val types = listOf(0xFF52, 0x0150)
-        val dev = MeshApiSession.datagram(event(0xFF52), "#roadstr", types)!!
+    fun `Road Events datagrams are read, with hops`() {
+        val types = MeshCoreApiClient.RECEIVE_DATA_TYPES
+        val dev = MeshApiSession.datagram(event(0x0150), "#roadstr", types)!!
         assertArrayEquals(byteArrayOf(1, 2, 3), dev.payload)
         assertEquals(-7.25, dev.snrDb, 0.0)
         assertEquals("2026-11-01T10:00:00.000Z", dev.receivedAt)
@@ -257,9 +263,10 @@ class MeshApiSessionTest {
 
     @Test
     fun `other data types, channels and own sends are ignored`() {
-        val types = listOf(0xFF52, 0x0150)
+        val types = MeshCoreApiClient.RECEIVE_DATA_TYPES
         assertNull(MeshApiSession.datagram(event(0xAE1C), "#roadstr", types))
-        assertNull(MeshApiSession.datagram(event(0xFF52, channel = "Public"), "#roadstr", types))
-        assertNull(MeshApiSession.datagram(event(0xFF52, outgoing = true), "#roadstr", types))
+        assertNull("the pre-allocation development value", MeshApiSession.datagram(event(0xFF52), "#roadstr", types))
+        assertNull(MeshApiSession.datagram(event(0x0150, channel = "Public"), "#roadstr", types))
+        assertNull(MeshApiSession.datagram(event(0x0150, outgoing = true), "#roadstr", types))
     }
 }

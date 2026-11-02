@@ -432,7 +432,7 @@ class MeshCoreApiClient(
         System.arraycopy(source, start, target, offset + 32 - length, length)
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "MeshCoreApi"
         const val PAIRING_PREFIX = "meshcore-open-pair-v1:"
         val NONCE_SHAPE = Regex("^[A-Za-z0-9_-]{16,128}={0,2}$")
@@ -445,14 +445,14 @@ class MeshCoreApiClient(
         const val RETRY_MS = 60_000L
 
         /**
-         * The `dataType` this app sends with: MeshCore's development range for now. Switch to
-         * [DATA_TYPE_ROAD_EVENTS] once MeshCore's allocation PR (`docs/number_allocations.md`) is
-         * merged.
+         * "Road Events", allocated in MeshCore's registry (`docs/number_allocations.md`,
+         * meshcore-dev/MeshCore#3750). The development value 0xFF52 used before is no longer
+         * sent or accepted.
          */
-        const val SEND_DATA_TYPE = 0xFF52
-        /** "Road Events", requested from MeshCore's registry. */
         const val DATA_TYPE_ROAD_EVENTS = 0x0150
-        /** Both are received, before and after the switch. */
-        val RECEIVE_DATA_TYPES = listOf(0xFF52, DATA_TYPE_ROAD_EVENTS)
+        /** The `dataType` this app sends with. */
+        const val SEND_DATA_TYPE = DATA_TYPE_ROAD_EVENTS
+        /** The `dataType`s this app subscribes to and accepts. */
+        val RECEIVE_DATA_TYPES = listOf(DATA_TYPE_ROAD_EVENTS)
     }
 }

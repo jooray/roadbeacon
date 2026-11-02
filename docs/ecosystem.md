@@ -204,9 +204,9 @@ ready; the transport is still the largest piece and needs hardware.
 5. **Types 12/13.** `police_station` and `surveillance_camera` are reportable in their app but could
    not go on the radio at all. They now have registry values.
 6. **MeshCore parameters.** Keep `#roadstr` (key
-   `b7f4317db7b03aeb563b2c4bdc476d6a`). `0x0150` ("Road Events") is requested in MeshCore's
-   registry (`docs/number_allocations.md`); both apps receive `0xFF52` and `0x0150` and send
-   `0xFF52` until the allocation is merged, then `0x0150`.
+   `b7f4317db7b03aeb563b2c4bdc476d6a`). `0x0150` ("Road Events") is allocated in MeshCore's
+   registry (`docs/number_allocations.md`); both apps send and receive only `0x0150`. The
+   development value `0xFF52` of the first test builds is retired.
 7. **Corrections.** Kinds 1317/1318 remain theirs; we do not implement them yet. They should be
    documented in the NIP when we do.
 
@@ -333,7 +333,6 @@ This repository: `nips/road-events.md`, `docs/ecosystem.md`,
 | 46 | comment limit in UTF-8 bytes when encoding |
 | 163 | largest channel datagram over BLE / MeshCore Open's local API |
 | 14 d / 30 d | relay retention floor / long-lived category lifetime |
-| 0xFF52 | `data_type` sent until MeshCore merges the allocation; always received |
-| 0x0150 | `data_type` "Road Events", requested; received now, sent after the merge |
+| 0x0150 | `data_type` "Road Events", allocated by MeshCore; sent and received |
 | `b7f4317db7b03aeb563b2c4bdc476d6a` | channel key of `#roadstr` |
 | 6 decimals | coordinate precision (≈11 cm) |

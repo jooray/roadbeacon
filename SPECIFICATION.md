@@ -150,8 +150,7 @@ length as the new one but a different meaning, so implementations must not mix v
 ### 4.1 Mesh transport
 
 The frame is sent unchanged in one MeshCore channel-data datagram (`0x3E`) on the public `#roadstr`
-hashtag channel. Senders use `data_type` `0xFF52` until MeshCore merges the requested allocation
-`0x0150`, then `0x0150`; receivers accept both. A bridge must never
+hashtag channel, with `data_type` `0x0150` ("Road Events", allocated by MeshCore). A bridge must never
 change author, ID or signature, must de-duplicate by event ID across transports, and must rate-limit
 both directions. See the NIP for parameters and `docs/ecosystem.md` for the bridge design and the
 hardware checklist.

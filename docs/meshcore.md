@@ -29,16 +29,15 @@ keeps working while reports flow.
 |---|---|
 | Channel | `#roadstr` (a MeshCore hashtag channel) |
 | Channel key | first 16 bytes of `SHA-256("#roadstr")` = `b7f4317db7b03aeb563b2c4bdc476d6a` |
-| `data_type` sent | `0xFF52` until MeshCore merges `0x0150`, then `0x0150` |
-| `data_type` received | `0xFF52` and `0x0150` |
+| `data_type` | `0x0150` "Road Events", sent and received |
 | Payload | exactly one frame: 117–163 bytes (report; up to 165 accepted) or 134 bytes (vote) |
 
 The channel is public: anyone who knows the name can derive the key. It is a shared meeting point,
-not a privacy feature. `0xFF52` lives in the firmware's development range (`FF00–FFFF`).
-`0x0150` "Road Events" is requested in MeshCore's registry (`docs/number_allocations.md`), with
-both apps named. Until it is merged, clients send `0xFF52` and receive both; after the merge the
-send value switches to `0x0150` (one constant, `SEND_DATA_TYPE` in `MeshCoreApiClient`) and
-`0xFF52` is still received for a while, so old and new senders hear each other.
+not a privacy feature. `0x0150` "Road Events" is allocated in MeshCore's registry
+(`docs/number_allocations.md`, [meshcore-dev/MeshCore#3750](https://github.com/meshcore-dev/MeshCore/pull/3750)),
+with both apps named. Test builds before 0.5.2 (Roadbeacon) and the first Roadstr road-test builds
+sent the development value `0xFF52`; it is no longer sent or accepted, so those builds must be
+updated.
 
 ## Sending
 
@@ -117,7 +116,7 @@ decisions, `MeshApiSessionTest` checks them):
    radio and has loaded its channels. The initial state comes from `hello`; after it, MeshCore Open
    sends `device` unprompted whenever that changes or the channel list changes. It carries `device`
    (as in `hello`) and `channels`.
-2. Radio connected: `events.subscribe` with `channel: "#roadstr"`, `dataTypes: [0xFF52, 0x0150]` and
+2. Radio connected: `events.subscribe` with `channel: "#roadstr"`, `dataTypes: [0x0150]` and
    `since` (the cursor). Not connected: no subscription; the status says so, the socket stays open,
    and the next `device` with `connected: true` subscribes.
 3. A subscription stays in place while the radio is away and comes back. A `device` message with
