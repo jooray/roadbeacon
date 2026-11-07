@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadbeacon: decentralizovaná dopravní hlášení</title>
+<meta name="description" content="Roadbeacon je decentralizovaný systém dopravních hlášení. Řidiči hlásí a vidí policii, nehody, stavební práce a nebezpečí jako podepsané události Nostr, které se šíří přes relé. Veřejná doména.">
+<meta name="theme-color" content="#474DD3">
+<link rel="canonical" href="https://jooray.github.io/roadbeacon/cs/">
+<link rel="alternate" hreflang="en" href="https://jooray.github.io/roadbeacon/">
+<link rel="alternate" hreflang="sk" href="https://jooray.github.io/roadbeacon/sk/">
+<link rel="alternate" hreflang="cs" href="https://jooray.github.io/roadbeacon/cs/">
+<link rel="alternate" hreflang="x-default" href="https://jooray.github.io/roadbeacon/">
+<meta property="og:title" content="Roadbeacon">
+<meta property="og:description" content="Waze bez centrálního sledování: dopravní události jako podepsané události Nostr, které se šíří přes relé.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jooray.github.io/roadbeacon/cs/">
+<meta property="og:image" content="https://jooray.github.io/roadbeacon/img/icon-512.png">
+<meta name="twitter:card" content="summary">
+<link rel="icon" type="image/png" sizes="32x32" href="../img/favicon-32.png">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<style>
+:root{--bg:#fff;--fg:#1a1b2e;--muted:#555a72;--card:#f3f4fc;--line:#d9dbf0;--accent:#474DD3;--accent-fg:#fff;--link:#3a40c0}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0e1c;--fg:#e8e9f7;--muted:#a3a7c4;--card:#171933;--line:#2a2d55;--accent:#6366F1;--accent-fg:#fff;--link:#9ea1ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.skip{position:absolute;left:-999px;top:0;background:var(--accent);color:var(--accent-fg);padding:.5rem 1rem}
+.skip:focus{left:0;z-index:10}
+.wrap{max-width:46rem;margin:0 auto;padding:0 1rem}
+header.hero{padding:2.5rem 0 1.5rem}
+.hero img.logo{width:96px;height:96px;border-radius:22px;display:block}
+h1{font-size:2.2rem;line-height:1.15;margin:1rem 0 .5rem}
+h2{font-size:1.4rem;margin:2.5rem 0 .75rem}
+.lead{font-size:1.15rem;color:var(--muted);margin:0 0 1.25rem}
+.btns{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.25rem 0}
+.btn{display:inline-block;padding:.7rem 1.1rem;border-radius:.6rem;background:var(--accent);color:var(--accent-fg);text-decoration:none;font-weight:600}
+.btn.alt{background:transparent;color:var(--link);border:2px solid var(--accent)}
+ol.steps{padding-left:1.25rem}
+ol.steps li{margin:.6rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.75rem;padding:1rem 1.25rem}
+.card ul{margin:.25rem 0;padding-left:1.2rem}
+figure{margin:1.5rem 0}
+figure img{max-width:100%;height:auto;border-radius:.6rem;border:1px solid var(--line);display:block}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:.4rem}
+code{font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+.announce{display:block;background:var(--accent);color:var(--accent-fg);padding:.65rem 1rem;text-align:center;font-weight:600;text-decoration:none}
+.announce:hover{text-decoration:underline}
+.lang{margin:0 0 1rem;text-align:right;font-size:.9rem}
+.lang a[aria-current]{color:var(--fg);font-weight:600;text-decoration:none}
+footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<a class="announce" href="meshcore-local-api.html#test">Pomozte otestovat dopravní hlášení přes rádio MeshCore: otevřít návod k testování →</a>
+<header class="hero"><div class="wrap">
+  <nav class="lang" aria-label="Jazyk"><a href="../" lang="en">English</a> · <a href="../sk/" lang="sk">Slovensky</a> · <a href="./" aria-current="page" lang="cs">Česky</a></nav>
+  <img class="logo" src="../img/icon-192.png" width="96" height="96" alt="Ikona Roadbeacon: bílý výstražný trojúhelník na indigovém pozadí">
+  <h1>Roadbeacon</h1>
+  <p class="lead">Decentralizovaný systém dopravních hlášení, Waze bez centrálního sledování. Řidiči hlásí a vidí policii, nehody, stavební práce a nebezpečí jako podepsané události Nostr, které se šíří přes relé. Nikdo to centrálně neřídí.</p>
+  <div class="btns">
+    <a class="btn" href="https://cypherpunk.today/static/roadbeacon/">Otevřít webovou aplikaci</a>
+    <a class="btn alt" href="https://zapstore.dev/apps/app.roadbeacon">Android na Zapstore</a>
+  </div>
+</div></header>
+<main id="main" class="wrap">
+
+<section aria-labelledby="how">
+  <h2 id="how">Jak to funguje</h2>
+  <ol class="steps">
+    <li>Řidič vybere kategorii (policie, nehoda, uzavírka, stavební práce, nebezpečí a další). Aplikace sestaví událost Nostr s polohou, geohashem a časem vypršení a podepíše ji klíčem řidiče. Klíč může být trvalá identita, nebo dočasný klíč.</li>
+    <li>Aplikace podepsanou událost zveřejní na relé Nostr. Může putovat i jako kompaktní binární zpráva přes sítě MeshCore LoRa (experimentálně, přes build MeshCore Open s lokálním API: <a href="meshcore-local-api.html">jak to funguje a jak to otestovat</a>).</li>
+    <li>Ostatní řidiči se ptají relé podle geohashe a vidí hlášení jako značky na mapě. Mohou potvrdit, že problém „stále trvá“, nebo že „už tam není“. Platnost hlášení závisí na typu: u kolon například 1 hodina, u rychlostních radarů 30 dní.</li>
+  </ol>
+  <figure>
+    <picture><source srcset="../img/screenshot-web.webp" type="image/webp"><img src="../img/screenshot-web.png" width="1299" height="629" alt="Webová aplikace Roadbeacon: mapa se značkami hlášení a okno s tlačítky Still there a Gone" loading="lazy"></picture>
+    <figcaption>Webová aplikace.</figcaption>
+  </figure>
+  <figure>
+    <picture><source srcset="../img/screenshot-android.webp" type="image/webp"><img src="../img/screenshot-android.png" width="1080" height="1096" alt="Aplikace Roadbeacon pro Android vedle OsmAnd s událostmi a tlačítkem Report" loading="lazy"></picture>
+    <figcaption>Aplikace pro Android (vlevo) a její integrace do OsmAnd s tlačítkem Report (vpravo).</figcaption>
+  </figure>
+</section>
+
+<section aria-labelledby="get">
+  <h2 id="get">Kde to získat</h2>
+  <div class="card"><ul>
+    <li>Webová aplikace: <a href="https://cypherpunk.today/static/roadbeacon/">cypherpunk.today/static/roadbeacon</a></li>
+    <li>Aplikace pro Android (plugin do OsmAnd): <a href="https://zapstore.dev/apps/app.roadbeacon">Zapstore</a>, nebo APK z <a href="https://github.com/jooray/roadbeacon/releases">vydání na GitHubu</a>. Přes Obtainium: <a href="obtainium://add/https://github.com/jooray/roadbeacon">přidat Roadbeacon</a>. K zobrazení událostí musí být nainstalovaný OsmAnd.</li>
+    <li>Zdrojový kód: <a href="https://github.com/jooray/roadbeacon">github.com/jooray/roadbeacon</a>. Veřejná doména (<a href="https://unlicense.org/">Unlicense</a>).</li>
+  </ul></div>
+</section>
+
+<section aria-labelledby="nostr">
+  <h2 id="nostr">Sledujte nás na Nostru</h2>
+  <div class="card"><ul>
+    <li><a href="nostr:npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">Otevřít v aplikaci Nostr</a></li>
+    <li><a href="https://njump.me/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">njump.me</a></li>
+    <li><a href="https://primal.net/p/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">Primal</a></li>
+    <li><a href="https://yakihonne.com/users/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">YakiHonne</a></li>
+    <li>NIP-05: <code>roadbeacon@cypherpunk.today</code></li>
+    <li>Adresa pro zapy: <code>roadbeacon@pay.cypherpunk.today</code></li>
+  </ul>
+  <p><code>npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h</code></p></div>
+</section>
+
+<section aria-labelledby="name">
+  <h2 id="name">O názvu</h2>
+  <p>Do verze 0.4 se Roadbeacon jmenoval Roadstr. Přejmenoval se, aby si ho nikdo nepletl s <a href="https://github.com/roadstrapp/roadstr-app">navigační aplikací Roadstr</a>, nezávislým projektem jiného autora. Aplikace spolu nesouvisejí a nejsou vzájemně zaměnitelné. Mají však společný formát dopravních událostí (Nostr kinds 1315 a 1316), takže každá umí zobrazit hlášení té druhé.</p>
+</section>
+</main>
+<footer><div class="wrap">
+  <p>Roadbeacon od Juraje Bednára. Další moje projekty: <a href="https://juraj.bednar.io/showcase/">přehled projektů</a>.</p>
+</div></footer>
+</body>
+</html>

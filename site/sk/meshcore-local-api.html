@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jedno rádio, veľa aplikácií: dopravné hlásenia cez MeshCore</title>
+<meta name="description" content="Ako sa Roadbeacon a Roadstr delia o uzol MeshCore s chatom cez lokálne API v MeshCore Open a ako to otestovať.">
+<meta name="theme-color" content="#474DD3">
+<link rel="canonical" href="https://jooray.github.io/roadbeacon/sk/meshcore-local-api.html">
+<link rel="alternate" hreflang="en" href="https://jooray.github.io/roadbeacon/meshcore-local-api.html">
+<link rel="alternate" hreflang="sk" href="https://jooray.github.io/roadbeacon/sk/meshcore-local-api.html">
+<link rel="alternate" hreflang="cs" href="https://jooray.github.io/roadbeacon/cs/meshcore-local-api.html">
+<link rel="alternate" hreflang="x-default" href="https://jooray.github.io/roadbeacon/meshcore-local-api.html">
+<meta property="og:title" content="Jedno rádio, veľa aplikácií: dopravné hlásenia cez MeshCore">
+<meta property="og:description" content="Prečo sa Roadbeacon a Roadstr delia o rádio MeshCore cez MeshCore Open a ako to otestovať.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://jooray.github.io/roadbeacon/sk/meshcore-local-api.html">
+<meta property="og:image" content="https://jooray.github.io/roadbeacon/img/icon-512.png">
+<meta name="twitter:card" content="summary">
+<link rel="icon" type="image/png" sizes="32x32" href="../img/favicon-32.png">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<style>
+:root{--bg:#fff;--fg:#1a1b2e;--muted:#555a72;--card:#f3f4fc;--line:#d9dbf0;--accent:#474DD3;--accent-fg:#fff;--link:#3a40c0}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0e1c;--fg:#e8e9f7;--muted:#a3a7c4;--card:#171933;--line:#2a2d55;--accent:#6366F1;--accent-fg:#fff;--link:#9ea1ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.skip{position:absolute;left:-999px;top:0;background:var(--accent);color:var(--accent-fg);padding:.5rem 1rem}
+.skip:focus{left:0;z-index:10}
+.wrap{max-width:46rem;margin:0 auto;padding:0 1rem}
+header.hero{padding:2rem 0 1rem}
+.back{font-size:.95rem}
+h1{font-size:2rem;line-height:1.2;margin:1rem 0 .5rem}
+h2{font-size:1.35rem;margin:2.25rem 0 .75rem}
+.lead{font-size:1.1rem;color:var(--muted);margin:0 0 1rem}
+.meta{color:var(--muted);font-size:.9rem}
+.btns{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.25rem 0}
+.btn{display:inline-block;padding:.7rem 1.1rem;border-radius:.6rem;background:var(--accent);color:var(--accent-fg);text-decoration:none;font-weight:600}
+.btn.alt{background:transparent;color:var(--link);border:2px solid var(--accent)}
+ol.steps{padding-left:1.25rem}
+ol.steps li{margin:.6rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.75rem;padding:1rem 1.25rem;margin:1rem 0}
+.card ul{margin:.25rem 0;padding-left:1.2rem}
+pre.diagram{background:var(--card);border:1px solid var(--line);border-radius:.75rem;padding:1rem;overflow-x:auto;font:.8rem/1.35 ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:1.5rem 0}
+figure img{max-width:100%;height:auto;border-radius:.6rem;border:1px solid var(--line);display:block}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:.4rem}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:1rem;align-items:start}
+.shots figure{margin:0}
+.narrow{max-width:26rem}
+code{font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
+h2[id]{scroll-margin-top:1rem}
+.lang{margin:0 0 1rem;text-align:right;font-size:.9rem}
+.lang a[aria-current]{color:var(--fg);font-weight:600;text-decoration:none}
+footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Preskočiť na obsah</a>
+<header class="hero"><div class="wrap">
+  <nav class="lang" aria-label="Jazyk"><a href="../meshcore-local-api.html" lang="en">English</a> · <a href="meshcore-local-api.html" aria-current="page" lang="sk">Slovensky</a> · <a href="../cs/meshcore-local-api.html" lang="cs">Česky</a></nav>
+  <a class="back" href="./">← Roadbeacon</a>
+  <h1>Jedno rádio, veľa aplikácií: dopravné hlásenia cez MeshCore</h1>
+  <p class="lead">Roadbeacon a Roadstr už vedia posielať a prijímať dopravné hlásenia cez rádio MeshCore LoRa a popritom na ňom môžete ďalej chatovať. Nižšie vysvetľujem, ako to funguje a prečo je to postavené takto, a ako môžete pomôcť s testovaním.</p>
+  <p class="meta">1. novembra 2026 · Experimentálne</p>
+  <div class="btns"><a class="btn" href="#test">Prejsť na návod na testovanie</a></div>
+</div></header>
+<main id="main" class="wrap">
+
+<section aria-labelledby="problem">
+  <h2 id="problem">Jeden uzol, jedna aplikácia</h2>
+  <p>Companion uzol MeshCore prijme naraz len jedno pripojenie cez Bluetooth. Ak máte jeden uzol, môže s ním v telefóne komunikovať len jedna aplikácia. Zvyčajne je to chatovací klient, napríklad MeshCore Open. Aplikácia na dopravné hlásenia, ktorá chce uzol použiť, musí tomu klientovi pripojenie zobrať a chat vtedy prestane fungovať. Musíte si teda vybrať: buď chat cez uzol, alebo posielanie a prijímanie dopravných hlásení.</p>
+</section>
+
+<section aria-labelledby="reticulum">
+  <h2 id="reticulum">Riešenie požičané od Reticula</h2>
+  <p><a href="https://reticulum.network/">Reticulum</a> to vyriešil už dávno. Rádiové rozhrania drží jeden démon, <code>rnsd</code>, a každý program v počítači sa cez neho dostane do siete. Preto môžu na jednom zariadení a jednom rádiu bežať vedľa seba messengery, prenos súborov, senzory aj mosty.</p>
+  <p>MeshCore môže fungovať rovnako. MeshCore Open si nechá svoje jediné pripojenie k uzlu a robí démona. Ostatné aplikácie v tom istom telefóne si cez malé lokálne API odoberajú prevádzku, ktorá ich zaujíma, a cez to isté pripojenie aj posielajú:</p>
+<pre class="diagram" role="img" aria-label="Roadstr alebo Roadbeacon a každá ďalšia aplikácia sa pripájajú k MeshCore Open cez lokálny WebSocket. MeshCore Open drží jediné pripojenie Bluetooth k rádiu a to komunikuje cez LoRa s ostatnými rádiami.">
+ Roadstr alebo ─┐
+ Roadbeacon     │  ws://127.0.0.1:8787   ┌───────────────┐   BLE   ┌───────┐   LoRa
+ ďalšia app ────┼───────────────────────►│ MeshCore Open │◄───────►│ rádio │◄────────► mesh
+ iná app ───────┘   (lokálne API)        │  (chat UI)    │         └───────┘
+                                         └───────────────┘
+</pre>
+  <p>V API nie je nič špecifické pre dopravné hlásenia. Aplikácia si vyberie kanál a dátový typ a dostáva svoju prevádzku. O uzol sa tak môže s chatom rovnako deliť aj zapisovač údajov zo senzorov, bot alebo aplikácia, ktorá cez mesh otvára dvere.</p>
+  <p>Rádiový protokol ani firmvér sa nemenia. Z telefónu neodchádza nič okrem toho, čo ide von cez LoRa.</p>
+</section>
+
+<section aria-labelledby="apps">
+  <h2 id="apps">Roadstr alebo Roadbeacon: vyberte si jeden</h2>
+  <p>Potrebujete jednu z dvoch dopravných aplikácií, nie obe. Používajú <a href="https://github.com/jooray/roadbeacon/blob/main/nips/road-events.md">rovnaký formát</a> a prechádzajú rovnakými testovacími vektormi, takže hlásenie z jednej sa objaví v druhej, cez rádio aj cez relé Nostr.</p>
+  <p>Líšia sa mapou. Roadbeacon je plugin do <a href="https://osmand.net/">OsmAnd</a>: ak už navigujete v OsmAnd, hlásenia sa objavia tam. <a href="https://github.com/roadstrapp/roadstr-app">Roadstr</a> je samostatná aplikácia s vlastnými mapami a navigáciou od iného autora.</p>
+</section>
+
+<section aria-labelledby="choices">
+  <h2 id="choices">Ako je to navrhnuté</h2>
+  <p>Lokálne API je vypnuté, kým ho nezapnete, a počúva len na <code>127.0.0.1</code>. Prehliadače odmieta, takže webová stránka sa cez neho k rádiu nedostane.</p>
+  <p>O povolenie žiada každá aplikácia len raz. Má vlastný kľúč a pri každom pripojení ho preukazuje. Prvýkrát sa MeshCore Open opýta „Povoliť pripojenie?“ a ukáže odtlačok kľúča, ktorý si môžete porovnať s tým, čo ukazuje aplikácia. Žiadny token nekopírujete a v nastaveniach MeshCore Open môžete aplikácii povolenie odobrať.</p>
+  <div class="shots">
+    <figure><picture><source srcset="../img/meshcore/pair-dialog.webp" type="image/webp"><img src="../img/meshcore/pair-dialog.png" width="719" height="805" alt="Dialóg MeshCore Open v angličtine: Allow connection? Roadbeacon chce cez túto aplikáciu odosielať a prijímať správy MeshCore. Odtlačok kľúča 03EB 90A7 DA16 A25C. Tlačidlá Deny a Allow." loading="lazy"></picture><figcaption>Keď sa aplikácia pripája prvýkrát, MeshCore Open sa opýta.</figcaption></figure>
+    <figure><picture><source srcset="../img/meshcore/local-api-settings.webp" type="image/webp"><img src="../img/meshcore/local-api-settings.png" width="719" height="1173" alt="Nastavenia lokálneho API v MeshCore Open: zapnuté API, jeho adresa a dve povolené aplikácie, Roadstr a Roadbeacon, každá s odtlačkom kľúča a dátumom spárovania." loading="lazy"></picture><figcaption>Nastavenia → Lokálne API: povolené aplikácie, ktoré môžete odstrániť.</figcaption></figure>
+  </div>
+  <p>Keď MeshCore Open stratí rádio, povie to pripojeným aplikáciám. Tie ukážu, že rádio nie je k dispozícii, počkajú a keď sa vráti, pokračujú samy.</p>
+  <p>Dopravné hlásenia idú cez hashtagový kanál <code>#roadstr</code>. Kľúč hashtagového kanála sa odvodzuje z názvu, takže aplikácia môže MeshCore Open požiadať o pridanie kanála a žiadne tajomstvo pritom neposiela. Vy to potvrdíte v dialógu. Kanál môže čítať ktokoľvek a je to zámer. Každé hlásenie nesie podpis autora, takže si ho môže overiť každý a nikto nemôže zverejniť hlásenie v mene niekoho iného.</p>
+  <figure class="narrow"><picture><source srcset="../img/meshcore/join-dialog.webp" type="image/webp"><img src="../img/meshcore/join-dialog.png" width="720" height="565" alt="Dialóg MeshCore Open v angličtine: Add a channel? Roadbeacon chce do rádia pridať hashtagový kanál #roadstr. Hashtagový kanál môže čítať a písať doň každý, kto pozná jeho názov. Tlačidlá Deny a Add." loading="lazy"></picture><figcaption>Keď uzol nemá kanál #roadstr, dopravná aplikácia oň požiada.</figcaption></figure>
+  <p>Hlásenia idú von ako dáta kanála MeshCore, nie ako text chatu, takže chatovacie klienty, ktoré formát nepoznajú, ich nikdy nezobrazia. MeshCore vedie register dátových typov a Road Events tam už majú vlastný: <code>0x0150</code> (<a href="https://github.com/meshcore-dev/MeshCore/pull/3750">MeshCore#3750</a>). Prvé testovacie buildy používali vývojovú hodnotu <code>0xFF52</code>, ktorú aktuálne buildy už neposielajú ani neprijímajú, takže aktualizujte všetky aplikácie naraz.</p>
+  <p>Hlásenie má 117 až 163 bajtov a hlas 134, takže sa každé zmestí do jedného paketu LoRa a nič sa nedelí. Odosielanie čaká na tiché rádio rovnako ako správy z chatu a mosty medzi rádiom a relé majú hodinové limity.</p>
+  <p>API je zatiaľ návrh pre MeshCore Open (<a href="https://github.com/zjs81/meshcore-open/issues/616">#616</a>). Referenčná dokumentácia je v <a href="https://github.com/jooray/meshcore-open/blob/test/localapi-4/documentation/LOCAL_API.md">LOCAL_API.md</a> a rádiovú stranu dopravných hlásení popisuje <a href="https://github.com/jooray/roadbeacon/blob/main/docs/meshcore.md">docs/meshcore.md</a>.</p>
+</section>
+
+<section aria-labelledby="test">
+  <h2 id="test">Ako to otestovať</h2>
+  <p>Potrebujete telefón s Androidom a companion uzol MeshCore s firmvérom 1.15 alebo novším. Oveľa lepšie sú dva telefóny s dvoma uzlami, pretože testujeme hlavne to, či hlásenie prejde z jedného rádia na druhé.</p>
+  <div class="btns">
+    <a class="btn" href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-5">Testovacie buildy MeshCore Open a Roadstr</a>
+    <a class="btn alt" href="https://zapstore.dev/apps/app.roadbeacon">Roadbeacon na Zapstore</a>
+  </div>
+  <div class="card">
+    <p><strong>Pred inštaláciou:</strong> testovací build MeshCore Open nahrádza oficiálnu aplikáciu a nedá sa nainštalovať cez ňu. Odinštalovanie oficiálnej aplikácie vymaže jej kontakty, kanály a históriu chatu, takže si najprv zapíšte kanály. Testovací build Roadstr sa nainštaluje vedľa bežného Roadstr. Roadbeacon je bežné vydanie, 0.5.2 alebo novšie, zo <a href="https://zapstore.dev/apps/app.roadbeacon">Zapstore</a> alebo z <a href="https://github.com/jooray/roadbeacon/releases/latest">GitHubu</a>.</p>
+  </div>
+  <ol class="steps">
+    <li>Nainštalujte testovací build MeshCore Open a pripojte ho k uzlu. Lokálne API je v tomto builde už zapnuté.</li>
+    <li>Nainštalujte jednu dopravnú aplikáciu a nastavte ju. Roadstr a Roadbeacon tieto voľby ukazujú po anglicky.
+      <ul>
+        <li>Roadstr: v nastaveniach, v časti MeshCore, zapnite <em>Use the radio through MeshCore Open</em> a potom <em>Receive</em> a <em>Send</em>. Ťuknite na <em>Allow in MeshCore Open</em> a potvrďte to tam.</li>
+        <li>Roadbeacon: v nastaveniach, v časti MeshCore, zapnite <em>Use MeshCore radio</em> a povoľte ho v MeshCore Open. Potom zapnite posielanie a zobrazovanie hlásení prijatých cez rádio.</li>
+      </ul>
+      Ak uzol nemá kanál <code>#roadstr</code>, MeshCore Open sa opýta, či ho má pridať.</li>
+    <li>Vypnite internet a na jednom telefóne niečo nahláste s krátkym komentárom. Na druhom telefóne by sa to malo objaviť, prijaté cez rádio. Skúste to oboma smermi a ak môžete, s Roadstr na jednom telefóne a Roadbeacon na druhom. Skúste aj hlasovanie a overte, že chat stále funguje.</li>
+    <li>Vypnite uzol a znova ho zapnite. Dopravná aplikácia by si to mala všimnúť a sama sa zotaviť.</li>
+  </ol>
+  <div class="shots">
+    <figure><picture><source srcset="../img/meshcore/roadstr-meshcore-settings.webp" type="image/webp"><img src="../img/meshcore/roadstr-meshcore-settings.png" width="720" height="1373" alt="Nastavenia Roadstr, časť MeshCore: zapnuté Use the radio through MeshCore Open, kľúč, ktorý má ukázať MeshCore Open, stav Connected and ready, zapnuté Receive a Send, oba mosty vypnuté." loading="lazy"></picture><figcaption>Nastavenia MeshCore v Roadstr, keď je pripojený a pripravený.</figcaption></figure>
+    <figure><picture><source srcset="../img/meshcore/roadstr-map.webp" type="image/webp"><img src="../img/meshcore/roadstr-map.jpg" width="719" height="1133" alt="Mapa Roadstr so starým mestom v Košiciach okolo Hlavnej ulice." loading="lazy"></picture><figcaption>Mapa v Roadstr. Hlásenia prijaté cez rádio sa tu objavia ako všetky ostatné.</figcaption></figure>
+  </div>
+  <p>Celý kontrolný zoznam a to, čo už je otestované, nájdete v <a href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-5">poznámkach k vydaniu</a> (po anglicky). Prechod hlásenia z jedného rádia na druhé zatiaľ nikto nepotvrdil. Ak to skúsite, dajte nám vedieť, ako to dopadlo: otvorte issue pre <a href="https://github.com/jooray/roadbeacon/issues">Roadbeacon</a>, <a href="https://github.com/jooray/meshcore-open/issues">lokálne API v MeshCore Open</a> alebo <a href="https://github.com/roadstrapp/roadstr-app/issues">Roadstr</a>, alebo napíšte na Nostri.</p>
+</section>
+</main>
+<footer><div class="wrap">
+  <p>Roadbeacon od Juraja Bednára. Ďalšie moje projekty: <a href="https://juraj.bednar.io/showcase/">prehľad projektov</a>.</p>
+</div></footer>
+</body>
+</html>
