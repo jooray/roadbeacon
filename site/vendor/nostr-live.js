@@ -1,4 +1,4 @@
-/*! nostr-live 1.0.0
+/*! nostr-live 1.0.1
    Live Nostr posts for any website. One file, no build step, no dependencies.
 
      <div data-nostr-live data-nprofile="nprofile1..."></div>
@@ -24,7 +24,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const root = typeof window !== 'undefined' ? window : globalThis;
   // a nonce on our own <script> is reused for the injected <style> (strict CSP)
   const ownScript = typeof document !== 'undefined' ? document.currentScript : null;
@@ -32,7 +32,11 @@
   /* ---------------------------------------------------------- 1. config -- */
 
   const CFG = {
-    relays: ['wss://nostr.cypherpunk.today', 'wss://relay.primal.net', 'wss://nos.lol'],
+    // The project's own relay is the primary one: always first, queried first, and
+    // its answer is the main source. The others only join if it is slow, empty or down.
+    primary: 'wss://nostr.cypherpunk.today',
+    headStart: 1200,        // ms the primary relay is given alone before the others are added
+    relays: ['wss://nostr.cypherpunk.today', 'wss://relay.primal.net', 'wss://relay.snort.social'],
     maxRelays: 5,
     maxLimit: 20,
     timeout: 8000,          // hard stop for a relay query
@@ -51,6 +55,8 @@
     maxContent: 60000,      // events with more content than this are dropped
     maxMentions: 12,
     maxRefs: 6,
+    badTtl: 10 * 60 * 1000, // a relay that failed to connect is skipped for this long (sessionStorage)
+    flaky: ['wss://relay.damus.io'], // dropped from nprofile hints unless the site lists them in `relays`
     cachePrefix: 'nostrlive1:'
   };
 
@@ -67,6 +73,7 @@
       unsupported: 'This browser cannot verify Nostr posts.',
       more: 'Show more', less: 'Show less', article: 'Article', readArticle: 'Read article',
       quotedNote: 'Quoted note', quotedArticle: 'Quoted article', openNote: 'Open note',
+      playVideo: 'Play video',
       imageAlt: 'Image in a post', videoLabel: 'Video in a post',
       follow: 'Follow on Nostr', followTitle: 'Opens your Nostr app', openIn: 'Open in',
       copy: 'Copy nprofile', copied: 'Copied', copyFailed: 'Copy failed',
@@ -78,6 +85,7 @@
       unsupported: 'Tento prehliadač nevie overiť príspevky z Nostru.',
       more: 'Zobraziť viac', less: 'Zobraziť menej', article: 'Článok', readArticle: 'Čítať článok',
       quotedNote: 'Citovaný príspevok', quotedArticle: 'Citovaný článok', openNote: 'Otvoriť príspevok',
+      playVideo: 'Prehrať video',
       imageAlt: 'Obrázok v príspevku', videoLabel: 'Video v príspevku',
       follow: 'Sledovať na Nostri', followTitle: 'Otvorí tvoju aplikáciu pre Nostr', openIn: 'Otvoriť v',
       copy: 'Kopírovať nprofile', copied: 'Skopírované', copyFailed: 'Kopírovanie zlyhalo',
@@ -89,6 +97,7 @@
       unsupported: 'Tento prohlížeč neumí ověřit příspěvky z Nostru.',
       more: 'Zobrazit víc', less: 'Zobrazit méně', article: 'Článek', readArticle: 'Číst článek',
       quotedNote: 'Citovaný příspěvek', quotedArticle: 'Citovaný článek', openNote: 'Otevřít příspěvek',
+      playVideo: 'Přehrát video',
       imageAlt: 'Obrázek v příspěvku', videoLabel: 'Video v příspěvku',
       follow: 'Sledovat na Nostru', followTitle: 'Otevře tvou aplikaci pro Nostr', openIn: 'Otevřít v',
       copy: 'Kopírovat nprofile', copied: 'Zkopírováno', copyFailed: 'Kopírování selhalo',
@@ -100,6 +109,7 @@
       unsupported: 'Dieser Browser kann Nostr-Beiträge nicht prüfen.',
       more: 'Mehr anzeigen', less: 'Weniger anzeigen', article: 'Artikel', readArticle: 'Artikel lesen',
       quotedNote: 'Zitierter Beitrag', quotedArticle: 'Zitierter Artikel', openNote: 'Beitrag öffnen',
+      playVideo: 'Video abspielen',
       imageAlt: 'Bild in einem Beitrag', videoLabel: 'Video in einem Beitrag',
       follow: 'Auf Nostr folgen', followTitle: 'Öffnet deine Nostr-App', openIn: 'Öffnen in',
       copy: 'nprofile kopieren', copied: 'Kopiert', copyFailed: 'Kopieren fehlgeschlagen',
@@ -111,6 +121,7 @@
       unsupported: 'Este navegador no puede verificar las publicaciones de Nostr.',
       more: 'Ver más', less: 'Ver menos', article: 'Artículo', readArticle: 'Leer artículo',
       quotedNote: 'Publicación citada', quotedArticle: 'Artículo citado', openNote: 'Abrir publicación',
+      playVideo: 'Reproducir vídeo',
       imageAlt: 'Imagen en una publicación', videoLabel: 'Vídeo en una publicación',
       follow: 'Seguir en Nostr', followTitle: 'Abre tu aplicación de Nostr', openIn: 'Abrir en',
       copy: 'Copiar nprofile', copied: 'Copiado', copyFailed: 'Error al copiar',
@@ -436,12 +447,25 @@
     } catch (e) { /* already closed */ }
   };
 
+  /* Relays that could not even be connected are remembered for the session,
+     so the next widget (or the next page) does not dial them again and add
+     another error to the console. */
+  const badKey = url => CFG.cachePrefix + 'bad:' + url;
+  const markBad = url => { try { sessionStorage.setItem(badKey(url), String(Date.now())); } catch (e) { /* blocked */ } };
+  const isBad = url => {
+    try {
+      const t = +sessionStorage.getItem(badKey(url));
+      return !!t && Date.now() - t < CFG.badTtl;
+    } catch (e) { return false; }
+  };
+  const markGood = url => { try { sessionStorage.removeItem(badKey(url)); } catch (e) { /* blocked */ } };
+
   const failConn = c => {
     if (c.dead) return;
     c.dead = true;
     clearTimeout(c.idle);
     clearTimeout(c.connTimer);
-    if (!c.opened) c.failedAt = Date.now();                     // never connected: cool down
+    if (!c.opened) { c.failedAt = Date.now(); markBad(c.url); }  // never connected: cool down
     else if (conns.get(c.url) === c) conns.delete(c.url);       // dropped later: reconnect next time
     const subs = [...c.subs.values()];
     c.subs.clear();
@@ -462,6 +486,7 @@
     ws.addEventListener('open', () => {
       clearTimeout(c.connTimer);
       c.open = c.opened = true;
+      markGood(c.url);
       for (const frame of c.queue) wsSend(c, frame);
       c.queue = [];
     });
@@ -517,27 +542,37 @@
   const query = (relays, filters, opts = {}) => new Promise(resolve => {
     const events = new Map();
     const unsubs = [];
-    let answered = 0, finished = 0, settled = false, graceTimer = 0;
+    // relays that failed to connect earlier this session are skipped, unless that would leave none
+    const usable = relays.filter(u => !isBad(u));
+    if (usable.length) relays = usable;
+    // With opts.headStart the primary relay is asked alone first. If it answers with
+    // events that is the answer; if it is slow (headStart ms), empty or down, the rest join.
+    const lead = opts.headStart && relays.length > 1 && relays[0] === CFG.primary;
+    let answered = 0, finished = 0, settled = false, graceTimer = 0, headTimer = 0, restStarted = !lead;
     const done = () => {
       if (settled) return;
       settled = true;
       clearTimeout(hard);
       clearTimeout(graceTimer);
+      clearTimeout(headTimer);
       for (const stop of unsubs) stop();
       resolve({ events: [...events.values()], answered, total: relays.length });
     };
     const hard = setTimeout(done, opts.timeout || CFG.timeout);
     if (!relays.length) { done(); return; }
-    for (const url of relays) {
+
+    const ask = (url, isLead) => {
       let over = false;
       const finish = ok => {
         if (over) return;
         over = true;
         finished += 1;
-        if (ok) {
-          answered += 1;
-          if (!graceTimer && finished < relays.length) graceTimer = setTimeout(done, CFG.grace);
+        if (ok) answered += 1;
+        if (isLead && !restStarted) {
+          if (ok && (opts.enough ? opts.enough([...events.values()]) : events.size)) { done(); return; }
+          startRest();
         }
+        if (ok && !graceTimer && finished < relays.length) graceTimer = setTimeout(done, CFG.grace);
         if (finished >= relays.length) done();
       };
       unsubs.push(subscribe(url, filters, {
@@ -547,6 +582,19 @@
         eose: () => finish(true),
         fail: () => finish(false)
       }));
+    };
+    function startRest() {
+      if (restStarted) return;
+      restStarted = true;
+      clearTimeout(headTimer);
+      for (const url of relays.slice(1)) ask(url, false);
+    }
+
+    if (lead) {
+      ask(relays[0], true);
+      headTimer = setTimeout(startRest, opts.headStart);
+    } else {
+      for (const url of relays) ask(url, false);
     }
   });
 
@@ -666,7 +714,7 @@
       const res = await query(relays, [
         { kinds: [0], authors: [pubkey], limit: 3 },
         { kinds: o.kinds, authors: [pubkey], limit: Math.min(100, Math.max(30, o.limit * 6)) }
-      ]);
+      ], { headStart: CFG.headStart, enough: evs => evs.some(ev => ev.kind !== 0) });
       return {
         profile: await newestProfile(res.events, pubkey),
         items: await selectEvents(res.events, pubkey, o),
@@ -904,7 +952,7 @@
      otherwise. */
 
   const CSS = `
-:where(.nl){
+.nl{
   --_gap:var(--nl-gap,1rem);
   --_radius:var(--nl-radius,10px);
   --_mradius:var(--nl-media-radius,var(--nl-radius,10px));
@@ -916,118 +964,120 @@
   --_skel:color-mix(in srgb,currentColor 12%,transparent);
   --_link:var(--nl-link,inherit);
   --_hfont:var(--nl-heading-font,inherit);
-  display:block;box-sizing:border-box;min-width:0;max-width:100%;
+  display:block;box-sizing:border-box;min-width:0;max-width:100%;margin:0;
   color:var(--nl-fg,inherit);background:var(--nl-bg,transparent);padding:var(--nl-pad,0);
   font-family:var(--nl-font,inherit);line-height:var(--nl-leading,1.5);overflow-wrap:anywhere;
 }
 @supports not (color:color-mix(in srgb,red,blue)){
-  :where(.nl){--_muted:var(--nl-muted,currentColor);--_border:var(--nl-border,rgba(128,128,128,.35));--_card:var(--nl-card-bg,rgba(128,128,128,.08));--_skel:rgba(128,128,128,.2)}
+  .nl{--_muted:var(--nl-muted,currentColor);--_border:var(--nl-border,rgba(128,128,128,.35));--_card:var(--nl-card-bg,rgba(128,128,128,.08));--_skel:rgba(128,128,128,.2)}
 }
-:where(.nl) *,:where(.nl) *::before,:where(.nl) *::after{box-sizing:border-box}
-:where(.nl) [hidden]{display:none!important}
-:where(.nl) :where(p,ol,ul,h1,h2,h3,h4,h5,h6,figure){margin:0;padding:0}
-:where(.nl) :where(a){color:inherit}
-:where(.nl) :where(button){font:inherit;color:inherit;margin:0}
-:where(.nl) :focus-visible{outline:2px solid var(--_accent);outline-offset:2px}
-:where(.nl__live){position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.nl--compact,.nl--ticker{--_av:calc(var(--nl-avatar-size,48px)*.62)}
+.nl,.nl *,.nl *::before,.nl *::after{box-sizing:border-box}
+.nl [hidden]{display:none!important}
+.nl__btn:focus-visible,.nl__more:focus-visible,.nl__tbtn:focus-visible,.nl__openlink:focus-visible,.nl__videolink:focus-visible,.nl__link:focus-visible,.nl__mention:focus-visible,.nl__tag:focus-visible,.nl__time:focus-visible,.nl__tlink:focus-visible,.nl__quote:focus-visible,.nl__article:focus-visible,.nl__imglink:focus-visible,.nl__video:focus-visible{outline:2px solid var(--_accent);outline-offset:2px}
+.nl__live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.nl__content{display:block;margin:0;padding:0}
 
 /* header */
-:where(.nl__head){display:grid;grid-template-columns:var(--_av) minmax(0,1fr);gap:calc(var(--_gap)*.75);align-items:center;margin-bottom:var(--_gap)}
-:where(.nl__avatar){position:relative;display:grid;place-items:center;width:var(--_av);height:var(--_av);border-radius:var(--nl-avatar-radius,50%);background:var(--_card);border:1px solid var(--_border);overflow:hidden;flex:none}
-:where(.nl__letter){font-family:var(--_hfont);font-weight:700;font-size:calc(var(--_av)*.42);line-height:1;color:var(--_muted)}
-:where(.nl__avatar img){position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-:where(.nl__who){min-width:0}
-:where(.nl__name){font-family:var(--_hfont);font-weight:700;font-size:1.2em;line-height:1.2}
-:where(.nl__nip05){font-size:.85em;color:var(--_muted)}
-:where(.nl__about){margin-top:.25em;font-size:.9em;color:var(--_muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-:where(.nl--compact,.nl--ticker){--_av:calc(var(--nl-avatar-size,48px)*.62)}
-:where(.nl--compact .nl__head,.nl--ticker .nl__head){margin-bottom:calc(var(--_gap)*.6)}
-:where(.nl--compact .nl__name,.nl--ticker .nl__name){font-size:1em}
+.nl__head{display:grid;grid-template-columns:var(--_av) minmax(0,1fr);gap:calc(var(--_gap)*.75);align-items:center;margin:0 0 var(--_gap);padding:0}
+.nl__head--slim{margin-bottom:calc(var(--_gap)*.6)}
+.nl__avatar{position:relative;display:grid;place-items:center;width:var(--_av);height:var(--_av);margin:0;padding:0;border-radius:var(--nl-avatar-radius,50%);background:var(--_card);border:1px solid var(--_border);overflow:hidden;flex:none}
+.nl__letter{font-family:var(--_hfont);font-weight:700;font-size:calc(var(--_av)*.42);line-height:1;color:var(--_muted)}
+.nl__avatarimg{position:absolute;inset:0;display:block;width:100%;height:100%;max-width:none;margin:0;padding:0;border:0;object-fit:cover}
+.nl__who{min-width:0;margin:0;padding:0}
+.nl__name{margin:0;padding:0;font-family:var(--_hfont);font-weight:700;font-size:1.2em;line-height:1.2;color:inherit}
+.nl__name--slim{font-size:1em}
+.nl__nip05{margin:0;padding:0;font-size:.85em;color:var(--_muted)}
+.nl__about{margin:.25em 0 0;padding:0;font-size:.9em;color:var(--_muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 /* list of notes */
-:where(.nl__list){list-style:none;display:flex;flex-direction:column}
-:where(.nl--list .nl__item,.nl--compact .nl__item){padding:calc(var(--_gap)*.8) 0;border-top:1px solid var(--_border)}
-:where(.nl--list .nl__item:last-child,.nl--compact .nl__item:last-child){border-bottom:1px solid var(--_border)}
-:where(.nl--cards .nl__list){display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,19rem),1fr));gap:var(--_gap)}
-:where(.nl--cards .nl__item){min-width:0;padding:var(--nl-card-pad,calc(var(--_gap)*.95));background:var(--_card);border:1px solid var(--_border);border-radius:var(--_radius)}
-:where(.nl__meta){display:flex;flex-wrap:wrap;align-items:center;gap:.2em .7em;margin-bottom:.35em;font-size:.82em;color:var(--_muted)}
-:where(.nl__time){color:inherit;text-decoration:none}
-:where(a.nl__time:hover){text-decoration:underline;text-underline-offset:.2em}
-:where(.nl__kind){padding:.05em .55em;border:1px solid var(--_border);border-radius:99px;font-size:.88em;letter-spacing:.04em;text-transform:uppercase}
-:where(.nl__body){min-width:0}
-:where(.nl__text){white-space:pre-wrap}
-:where(.nl__text a){color:var(--_link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.18em}
-:where(.nl__text a:hover){text-decoration-thickness:2px}
-:where(.nl__mention){font-weight:600}
-:where(.nl__tag){text-decoration-style:dotted!important}
-:where(.nl__more){appearance:none;background:none;border:0;padding:.3em 0 0;cursor:pointer;font-size:.88em;font-weight:600;color:var(--_link);text-decoration:underline;text-underline-offset:.18em}
+.nl__list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0}
+.nl__list--cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,19rem),1fr));grid-auto-flow:row dense;gap:var(--_gap);align-items:start}
+.nl__list--ticker{flex:1;min-width:0}
+.nl__item{display:block;min-width:0;margin:0;padding:0;list-style:none}
+.nl__item--list,.nl__item--compact{padding:calc(var(--_gap)*.8) 0;border-top:1px solid var(--_border)}
+.nl__item--list:last-child,.nl__item--compact:last-child{border-bottom:1px solid var(--_border)}
+.nl__item--cards{padding:var(--nl-card-pad,calc(var(--_gap)*.95));background:var(--_card);border:1px solid var(--_border);border-radius:var(--_radius)}
+.nl__item--span{grid-column:span 2}
+.nl__item--skel{display:flex;flex-direction:column;gap:.55em;pointer-events:none}
+.nl__item--ticker{display:flex;flex-direction:row;align-items:center;gap:.7em;padding:0;border:0}
+.nl__item--in{animation:nl-in .35s ease}
+.nl__meta{display:flex;flex-wrap:wrap;align-items:center;gap:.2em .7em;margin:0 0 .35em;padding:0;font-size:.82em;color:var(--_muted)}
+.nl__meta--ticker{flex:none;margin:0}
+.nl__time{color:inherit;text-decoration:none}
+.nl__time:hover{text-decoration:underline;text-underline-offset:.2em}
+.nl__kind{display:inline-block;margin:0;padding:.05em .55em;border:1px solid var(--_border);border-radius:99px;font-size:.88em;letter-spacing:.04em;text-transform:uppercase}
+.nl__body{min-width:0;margin:0;padding:0}
+.nl__text{margin:0;padding:0;white-space:pre-wrap}
+.nl__link,.nl__mention,.nl__tag{color:var(--_link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.18em}
+.nl__link:hover,.nl__mention:hover,.nl__tag:hover{text-decoration-thickness:2px}
+.nl__mention{font-weight:600}
+.nl__tag{text-decoration-style:dotted}
+.nl__more{appearance:none;background:none;border:0;margin:0;padding:.3em 0 0;font:inherit;font-size:.88em;font-weight:600;color:var(--_link);text-decoration:underline;text-underline-offset:.18em;cursor:pointer}
 
 /* media */
-:where(.nl__medialist){display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:.5em;margin-top:.7em;align-items:start}
-:where(.nl__medialist:has(> :only-child)){grid-template-columns:minmax(0,34rem)}
-:where(.nl__media){position:relative;width:100%;border-radius:var(--_mradius);background:var(--_card);overflow:hidden}
-:where(.nl__media.is-tall){max-width:min(100%,20rem)}
-:where(.nl__imglink){display:block;width:100%;height:100%}
-:where(.nl__media img,.nl__media video){display:block;width:100%;height:100%;object-fit:contain}
-:where(.nl__media video){background:#000}
-:where(.nl__media.is-broken){display:grid;place-items:center;padding:.6em;aspect-ratio:auto!important}
-:where(.nl__media.is-broken .nl__imglink){font-size:.82em;color:var(--_muted);text-align:center}
+.nl__medialist{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:.5em;margin:.7em 0 0;padding:0;align-items:start}
+.nl__medialist--one{grid-template-columns:minmax(0,34rem)}
+.nl__media{position:relative;width:100%;margin:0;padding:0;border-radius:var(--_mradius);background:var(--_card);overflow:hidden}
+.nl__media--tall{max-width:min(100%,20rem)}
+.nl__media--video{max-height:var(--nl-video-max-height,22rem);background:#000}
+.nl__media--lead{margin:0 0 .7em}
+.nl__media--broken{display:grid;place-items:center;padding:.6em;aspect-ratio:auto!important}
+.nl__imglink{display:block;width:100%;height:100%;margin:0;padding:0}
+.nl__imglink--broken{height:auto;font-size:.82em;color:var(--_muted);text-align:center}
+.nl__img,.nl__video{display:block;width:100%;height:100%;max-width:none;margin:0;padding:0;border:0;object-fit:contain}
+.nl__video{background:#000}
+.nl__videolink{display:inline-flex;align-items:center;justify-self:start;gap:.5em;appearance:none;margin:0;padding:.5em .85em;border:1px solid var(--_border);border-radius:var(--_radius);background:var(--_card);color:inherit;font:inherit;font-size:.9em;font-weight:600;line-height:1.2;cursor:pointer}
+.nl__videolink:hover{border-color:var(--_accent)}
 
 /* quoted notes and articles */
-:where(.nl__quote,.nl__article){display:block;margin-top:.7em;padding:.65em .8em;border:1px solid var(--_border);border-radius:var(--_radius);background:var(--_card);color:inherit;text-decoration:none}
-:where(.nl__quote:hover,.nl__article:hover){border-color:var(--_accent)}
-:where(.nl__quote > span,.nl__article > span){display:block}
-:where(.nl__qtop){display:flex!important;flex-wrap:wrap;justify-content:space-between;gap:0 .8em;font-size:.82em;color:var(--_muted)}
-:where(.nl__qname){font-weight:600;color:inherit}
-:where(.nl__qtitle,.nl__atitle){margin:.15em 0 0;font-family:var(--_hfont);font-weight:700;font-size:1.08em;line-height:1.25}
-:where(.nl__qbody,.nl__asum){margin-top:.25em;font-size:.92em;color:var(--_muted);line-height:1.45}
-:where(.nl__qbody){display:-webkit-box!important;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-:where(.nl__article){margin-top:0}
-:where(.nl__article .nl__media){margin-bottom:.7em}
-:where(.nl__atags){display:flex!important;flex-wrap:wrap;gap:.3em .5em;margin-top:.5em;font-size:.8em;color:var(--_muted)}
-:where(.nl__quote.is-bare){width:max-content;max-width:100%}
-:where(.nl__quote.is-bare,.nl__aread){display:flex!important;align-items:center;gap:.5em;font-size:.88em;font-weight:600}
-:where(.nl__aread){margin-top:.6em;color:var(--_link)}
-:where(.nl--cards .nl__article){padding:0;border:0;background:none;border-radius:0}
-:where(.nl .arrow){flex:none}
+.nl__quote,.nl__article{display:block;margin:.7em 0 0;padding:.65em .8em;border:1px solid var(--_border);border-radius:var(--_radius);background:var(--_card);color:inherit;text-decoration:none}
+.nl__quote:hover,.nl__article:hover{border-color:var(--_accent)}
+.nl__article{margin-top:0}
+.nl__article--flat{padding:0;border:0;border-radius:0;background:none}
+.nl__quote--bare{display:flex;align-items:center;gap:.5em;width:max-content;max-width:100%;font-size:.88em;font-weight:600}
+.nl__qlabel{font-weight:600}
+.nl__qtop{display:flex;flex-wrap:wrap;justify-content:space-between;gap:0 .8em;font-size:.82em;color:var(--_muted)}
+.nl__qname{font-weight:600;color:inherit}
+.nl__qtitle,.nl__atitle{display:block;margin:.15em 0 0;padding:0;font-family:var(--_hfont);font-weight:700;font-size:1.08em;line-height:1.25;color:inherit}
+.nl__qbody{display:-webkit-box;margin:.25em 0 0;font-size:.92em;line-height:1.45;color:var(--_muted);-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.nl__asum{display:block;margin:.25em 0 0;font-size:.92em;line-height:1.45;color:var(--_muted)}
+.nl__atags{display:flex;flex-wrap:wrap;gap:.3em .5em;margin:.5em 0 0;font-size:.8em;color:var(--_muted)}
+.nl__aread{display:flex;align-items:center;gap:.5em;margin:.6em 0 0;font-size:.88em;font-weight:600;color:var(--_link)}
+.nl__arrow{flex:none}
 
 /* status, buttons, follow */
-:where(.nl__status){display:flex;flex-wrap:wrap;align-items:center;gap:.5em .9em;margin-top:var(--_gap);color:var(--_muted)}
-:where(.nl__btn){display:inline-flex;align-items:center;justify-content:center;gap:.45em;appearance:none;padding:.5em .95em;border:1px solid var(--nl-accent,var(--_border));border-radius:var(--_radius);background:transparent;color:inherit;font-size:.9em;font-weight:600;line-height:1.2;text-decoration:none;cursor:pointer}
-:where(.nl__btn:hover){background:var(--_card);border-color:var(--_accent)}
-:where(.nl__btn--primary){background:var(--nl-accent,transparent);color:var(--nl-accent-fg,inherit);border-color:var(--_accent)}
-:where(.nl__btn--primary:hover){background:var(--nl-accent,var(--_card));filter:brightness(1.08)}
-:where(.nl__foot){margin-top:calc(var(--_gap)*1.1)}
-:where(.nl__follow){display:flex;flex-wrap:wrap;gap:.5em}
-:where(.nl__openin){display:flex;flex-wrap:wrap;align-items:center;gap:.2em 1.1em;margin-top:.7em;font-size:.9em}
-:where(.nl__openin a,.nl__openin button){appearance:none;background:none;border:0;padding:.3em 0;cursor:pointer;color:var(--_link);font-weight:600;text-decoration:underline;text-underline-offset:.2em}
+.nl__status{display:flex;flex-wrap:wrap;align-items:center;gap:.5em .9em;margin:var(--_gap) 0 0;padding:0;color:var(--_muted)}
+.nl__btn{display:inline-flex;align-items:center;justify-content:center;gap:.45em;appearance:none;margin:0;padding:.5em .95em;border:1px solid var(--nl-accent,var(--_border));border-radius:var(--_radius);background:transparent;color:inherit;font:inherit;font-size:.9em;font-weight:600;line-height:1.2;text-decoration:none;cursor:pointer}
+.nl__btn:hover{background:var(--_card);border-color:var(--_accent)}
+.nl__btn--primary{background:var(--nl-accent,transparent);color:var(--nl-accent-fg,inherit);border-color:var(--_accent);text-decoration:none}
+.nl__btn--primary:hover{background:var(--nl-accent,var(--_card));color:var(--nl-accent-fg,inherit);filter:brightness(1.08)}
+.nl__foot{margin:calc(var(--_gap)*1.1) 0 0;padding:0}
+.nl__follow{display:flex;flex-wrap:wrap;gap:.5em;margin:0;padding:0}
+.nl__openin{display:flex;flex-wrap:wrap;align-items:center;gap:.2em 1.1em;margin:.7em 0 0;padding:0;font-size:.9em}
+.nl__openlink{appearance:none;background:none;border:0;margin:0;padding:.3em 0;font:inherit;font-weight:600;color:var(--_link);text-decoration:underline;text-underline-offset:.2em;cursor:pointer}
 
 /* skeletons */
-:where(.nl__skel){display:block;height:.85em;border-radius:.4em;background:var(--_skel);animation:nl-pulse 1.4s ease-in-out infinite}
-:where(.nl__skel--avatar){width:var(--_av);height:var(--_av);border-radius:var(--nl-avatar-radius,50%)}
-:where(.nl__skel--media){height:auto;aspect-ratio:16/9;border-radius:var(--_mradius);margin-top:.7em}
-:where(.nl__item.is-skel){display:flex;flex-direction:column;gap:.55em;pointer-events:none}
+.nl__skel{display:block;height:.85em;margin:0;padding:0;border-radius:.4em;background:var(--_skel);animation:nl-pulse 1.4s ease-in-out infinite}
+.nl__skel--avatar{width:var(--_av);height:var(--_av);border-radius:var(--nl-avatar-radius,50%)}
+.nl__skel--media{height:auto;aspect-ratio:16/9;border-radius:var(--_mradius);margin-top:.7em}
 @keyframes nl-pulse{50%{opacity:.45}}
 
 /* compact and ticker */
-:where(.nl__tlink){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:inherit;text-decoration:none}
-:where(a.nl__tlink:hover){text-decoration:underline;text-underline-offset:.2em}
-:where(.nl--ticker .nl__row){display:flex;align-items:center;gap:.5em;min-height:2.4em;border-block:1px solid var(--_border)}
-:where(.nl--ticker .nl__list){flex:1;min-width:0}
-:where(.nl--ticker .nl__item){display:flex;align-items:center;gap:.7em;min-width:0}
-:where(.nl--ticker .nl__item .nl__meta){margin:0;flex:none}
-:where(.nl--ticker .nl__tlink){display:block;min-width:0;flex:1;white-space:nowrap;text-overflow:ellipsis}
-:where(.nl--ticker .nl__item.is-in){animation:nl-in .35s ease}
-:where(.nl__tctl){display:flex;flex:none}
-:where(.nl__tbtn){appearance:none;display:grid;place-items:center;width:2.2em;height:2.2em;padding:0;border:0;border-radius:var(--_radius);background:none;cursor:pointer;color:var(--_muted)}
-:where(.nl__tbtn:hover){color:inherit;background:var(--_card)}
+.nl__tlink{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:0;padding:0;color:inherit;text-decoration:none}
+.nl__tlink:hover{text-decoration:underline;text-underline-offset:.2em}
+.nl__tlink--ticker{display:block;flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis}
+.nl__row{display:flex;align-items:center;gap:.5em;min-height:2.4em;margin:0;padding:0;border-block:1px solid var(--_border)}
+.nl__tctl{display:flex;flex:none;margin:0;padding:0}
+.nl__tbtn{appearance:none;display:grid;place-items:center;width:2.2em;height:2.2em;margin:0;padding:0;border:0;border-radius:var(--_radius);background:none;color:var(--_muted);cursor:pointer}
+.nl__tbtn:hover{color:inherit;background:var(--_card)}
 @keyframes nl-in{from{opacity:0;transform:translateY(.45em)}}
 @media (prefers-reduced-motion:reduce){
-  :where(.nl__skel){animation:none}
-  :where(.nl--ticker .nl__item.is-in){animation:none}
+  .nl__skel{animation:none}
+  .nl__item--in{animation:none}
 }
 @media (max-width:480px){
-  :where(.nl--ticker .nl__item .nl__meta){display:none}
+  .nl__meta--ticker{display:none}
 }
 `;
 
@@ -1079,7 +1129,7 @@
     }
     return svg;
   };
-  const arrow = () => icon(['M4 12L12 4', 'M6 4h6v6'], 12, 'arrow');
+  const arrow = () => icon(['M4 12L12 4', 'M6 4h6v6'], 12, 'nl__arrow');
 
   const skel = (cls, width) => {
     const s = el('span', 'nl__skel' + (cls ? ' ' + cls : ''));
@@ -1091,7 +1141,7 @@
     const box = el('div', 'nl__media');
     const ok = info.w > 0 && info.h > 0;
     box.style.aspectRatio = ok ? `${info.w} / ${info.h}` : fallbackRatio;
-    if (ok && info.h / info.w > 1.25) box.classList.add('is-tall');
+    if (ok && info.h / info.w > 1.25) box.classList.add('nl__media--tall');
     return box;
   };
 
@@ -1099,6 +1149,7 @@
     const box = mediaBox(info, '16 / 10');
     const link = extLink(info.url, 'nl__imglink');
     const img = document.createElement('img');
+    img.className = 'nl__img';
     img.src = info.url;
     img.alt = info.alt || altFallback;
     img.loading = 'lazy';
@@ -1106,7 +1157,8 @@
     img.referrerPolicy = 'no-referrer';
     if (info.w > 0 && info.h > 0) { img.width = info.w; img.height = info.h; }
     img.addEventListener('error', () => {
-      box.classList.add('is-broken');
+      box.classList.add('nl__media--broken');
+      link.classList.add('nl__imglink--broken');
       img.remove();
       link.textContent = shownUrl(new URL(info.url));
     });
@@ -1115,14 +1167,18 @@
     return box;
   };
 
-  const videoNode = (info, label) => {
+  /* Never autoplays. The first video of a note loads its metadata and shows
+     frame 0.1 s in, so the card is not a black rectangle; the rest wait. */
+  const videoNode = (info, label, first) => {
     const box = mediaBox(info, '16 / 9');
+    box.classList.add('nl__media--video');
     const video = document.createElement('video');
+    video.className = 'nl__video';
     video.controls = true;
-    video.preload = 'none';
+    video.preload = first ? 'metadata' : 'none';
     video.playsInline = true;
     video.setAttribute('playsinline', '');
-    video.src = info.url;
+    video.src = first ? `${info.url}#t=0.1` : info.url;
     video.setAttribute('aria-label', info.alt || label);
     video.referrerPolicy = 'no-referrer';
     box.appendChild(video);
@@ -1173,7 +1229,38 @@
     if (d.skipReplies !== undefined) out.skipReplies = d.skipReplies;
     if (d.emptyText) out.emptyText = d.emptyText;
     if (d.class) out.className = d.class;
+    if (d.videos) out.videos = d.videos;
+    if (d.featureArticles !== undefined) out.featureArticles = d.featureArticles;
+    if (d.ignoreRelays) out.ignoreRelays = d.ignoreRelays.split(',').map(s => s.trim()).filter(Boolean);
     return out;
+  };
+
+  /* Works out language, locale and the string lookup. Called again when an
+     `auto` widget sees <html lang> change. */
+  const setLang = (o, host) => {
+    const holder = host.closest ? host.closest('[lang]') : null;
+    const full = !o.langAuto ? o.rawLang
+      : (holder && holder.getAttribute('lang')) || document.documentElement.lang || 'en';
+    o.lang = String(full).toLowerCase().split(/[-_]/)[0] || 'en';
+    try { o.locale = Intl.getCanonicalLocales(String(full).replace('_', '-'))[0]; } catch (e) { o.locale = o.lang; }
+    // `strings` is { sk: {...}, pt: {...} } or, as a shorthand, one flat { key: text } for this language
+    const custom = o.rawStrings;
+    const flat = Object.values(custom).some(v => typeof v === 'string');
+    const mine = flat ? custom : (custom[o.lang] || {});
+    const dict = Object.assign({}, STRINGS.en, STRINGS[o.lang] || {}, mine);
+    o.t = (key, vars) => String(dict[key] != null ? dict[key] : key)
+      .replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : ''));
+  };
+
+  /* The relays a widget talks to, in order: the primary relay first, then the
+     nprofile's own hints (their order kept), then the `relays` list. */
+  const buildRelays = (raw, ref) => {
+    const listed = Array.isArray(raw.relays) && raw.relays.length ? raw.relays : CFG.relays;
+    const named = new Set(listed.map(cleanRelay));
+    const ignore = new Set((Array.isArray(raw.ignoreRelays) ? raw.ignoreRelays : []).map(cleanRelay));
+    // hints from relays known to fail handshakes are dropped unless the site lists them itself
+    const hints = ref ? ref.relays.filter(u => !CFG.flaky.includes(cleanRelay(u)) || named.has(cleanRelay(u))) : [];
+    return [...new Set([CFG.primary, ...hints, ...listed].map(cleanRelay).filter(u => u && !ignore.has(u)))].slice(0, CFG.maxRelays);
   };
 
   const normalise = (raw, host) => {
@@ -1182,13 +1269,14 @@
     o.valid = !!ref && ref.type === 'nprofile';
     o.pubkey = o.valid ? ref.pubkey : '';
     o.nprofile = o.valid ? String(raw.nprofile).trim().replace(/^nostr:/i, '') : '';
-    const listed = Array.isArray(raw.relays) && raw.relays.length ? raw.relays : CFG.relays;
-    o.relays = [...new Set([...(o.valid ? ref.relays : []), ...listed].map(cleanRelay).filter(Boolean))].slice(0, CFG.maxRelays);
+    o.relays = buildRelays(raw, o.valid ? ref : null);
     o.limit = Math.min(CFG.maxLimit, Math.max(1, Math.floor(+raw.limit) || 5));
     o.layout = ['list', 'cards', 'compact', 'ticker'].includes(raw.layout) ? raw.layout : 'list';
     o.header = truthy(raw.header, true);
     o.follow = truthy(raw.follow, true);
     o.media = truthy(raw.media, true);
+    o.videos = raw.videos === 'link' ? 'link' : 'inline';
+    o.feature = truthy(raw.featureArticles, true);
     o.skipReplies = truthy(raw.skipReplies, true);
     o.loadOn = raw.loadOn === 'now' ? 'now' : 'visible';
     const kinds = (Array.isArray(raw.onlyKinds) ? raw.onlyKinds : KINDS_SHOWN).filter(k => KINDS_SHOWN.includes(k));
@@ -1199,20 +1287,10 @@
     // how many notes are drawn: the compact layout is a teaser, the ticker rotates through them
     o.shown = o.layout === 'compact' ? Math.min(o.limit, 3) : o.limit;
 
-    const asked = String(raw.lang || 'auto').trim();
-    const holder = host.closest ? host.closest('[lang]') : null;
-    const full = asked && asked.toLowerCase() !== 'auto' ? asked
-      : (holder && holder.getAttribute('lang')) || document.documentElement.lang || 'en';
-    o.lang = String(full).toLowerCase().split(/[-_]/)[0] || 'en';
-    try { o.locale = Intl.getCanonicalLocales(String(full).replace('_', '-'))[0]; } catch (e) { o.locale = o.lang; }
-
-    // `strings` is { sk: {...}, pt: {...} } or, as a shorthand, one flat { key: text } for this language
-    const custom = raw.strings && typeof raw.strings === 'object' ? raw.strings : {};
-    const flat = Object.values(custom).some(v => typeof v === 'string');
-    const mine = flat ? custom : (custom[o.lang] || {});
-    const dict = Object.assign({}, STRINGS.en, STRINGS[o.lang] || {}, mine);
-    o.t = (key, vars) => String(dict[key] != null ? dict[key] : key)
-      .replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : ''));
+    o.langAuto = String(raw.lang || 'auto').trim().toLowerCase() === 'auto';
+    o.rawLang = String(raw.lang || 'auto').trim();
+    o.rawStrings = raw.strings && typeof raw.strings === 'object' ? raw.strings : {};
+    setLang(o, host);
     return o;
   };
 
@@ -1225,7 +1303,7 @@
     injectStyles();
 
     const o = normalise(Object.assign({}, fromDataset(host), options || {}), host);
-    const t = o.t;
+    const t = (key, vars) => o.t(key, vars);
     const id = ++uid;
     const hint = o.relays[0] || '';
     const originalChildren = [...host.childNodes];
@@ -1236,8 +1314,11 @@
     const mentionSpots = [];   // { a, pubkey }
     const quoteSpots = [];     // { card, ref }
     const teaserSpots = [];    // { node, ev }
+    const featureItems = [];   // article items that may span two card columns
     let destroyed = false, runId = 0, observer = null, tickTimer = 0, tickIndex = 0, signature = '';
     const cleanups = [];
+    let outsideFn = null;
+    cleanups.push(() => { if (outsideFn) document.removeEventListener('click', outsideFn); });
 
     const profileOf = pk => {
       if (pk === o.pubkey && S.profile) return parseProfile(S.profile);
@@ -1250,9 +1331,10 @@
     };
 
     /* ----- time ----- */
-    const rtf = (() => {
+    const makeRtf = () => {
       try { return new Intl.RelativeTimeFormat(o.locale, { numeric: 'auto' }); } catch (e) { return null; }
-    })();
+    };
+    let rtf = makeRtf();
     const when = ts => {
       const diff = Math.min(0, ts - Math.floor(Date.now() / 1000));
       const abs = -diff;
@@ -1283,6 +1365,7 @@
     const head = el('header', 'nl__head');
     const body = el('div', 'nl__content');
     const list = el('ol', 'nl__list');
+    list.classList.add('nl__list--' + o.layout);
     const status = el('p', 'nl__status');
     status.hidden = true;
     const foot = el('div', 'nl__foot');
@@ -1302,6 +1385,8 @@
 
     /* ----- header ----- */
     function drawHead() {
+      const slim = o.layout === 'compact' || o.layout === 'ticker';
+      head.classList.toggle('nl__head--slim', slim);
       head.replaceChildren();
       head.hidden = !o.header || !o.valid;
       if (head.hidden) return;
@@ -1320,6 +1405,7 @@
       const pic = p && p.picture && safeUrl(p.picture);
       if (pic && pic.protocol === 'https:') {
         const img = document.createElement('img');
+        img.className = 'nl__avatarimg';
         img.alt = '';
         img.width = 96;
         img.height = 96;
@@ -1332,8 +1418,7 @@
       }
       head.appendChild(avatar);
       const who = el('div', 'nl__who');
-      who.appendChild(el('h' + o.headingLevel, 'nl__name', name));
-      const slim = o.layout === 'compact' || o.layout === 'ticker';
+      who.appendChild(el('h' + o.headingLevel, 'nl__name' + (slim ? ' nl__name--slim' : ''), name));
       if (p && p.nip05 && !slim) who.appendChild(el('p', 'nl__nip05', p.nip05));
       if (p && p.about && !slim) who.appendChild(el('p', 'nl__about', p.about));
       head.appendChild(who);
@@ -1393,12 +1478,12 @@
       const ev = S.extras.refs[refKey(ref)];
       card.replaceChildren();
       if (!ev) {
-        card.classList.add('is-bare');
+        card.classList.add('nl__quote--bare');
         card.appendChild(el('span', 'nl__qlabel', ref.type === 'naddr' ? t('quotedArticle') : t('quotedNote')));
         card.appendChild(arrow());
         return;
       }
-      card.classList.remove('is-bare');
+      card.classList.remove('nl__quote--bare');
       const top = el('span', 'nl__qtop');
       top.append(el('span', 'nl__qname', nameOf(ev.pubkey)), el('span', 'nl__qtime', when(ev.created_at)));
       card.appendChild(top);
@@ -1436,11 +1521,11 @@
     }
 
     function teaserNode(ev) {
-      const li = el('li', 'nl__item nl__teaser');
-      const meta = el('div', 'nl__meta');
+      const li = el('li', 'nl__item nl__item--' + o.layout);
+      const meta = el('div', 'nl__meta' + (o.layout === 'ticker' ? ' nl__meta--ticker' : ''));
       meta.appendChild(timeNode(ev.created_at));
       if (ev.kind === 30023) meta.appendChild(el('span', 'nl__kind', t('article')));
-      const link = extLink(noteTarget(ev), 'nl__tlink', teaserText(ev));
+      const link = extLink(noteTarget(ev), 'nl__tlink' + (o.layout === 'ticker' ? ' nl__tlink--ticker' : ''), teaserText(ev));
       link.setAttribute('dir', 'auto');
       teaserSpots.push({ link, ev });
       li.append(meta, link);
@@ -1448,13 +1533,15 @@
     }
 
     function articleNode(ev, target) {
-      const card = extLink(target, 'nl__article');
+      const card = extLink(target, 'nl__article' + (o.layout === 'cards' ? ' nl__article--flat' : ''));
       card.setAttribute('dir', 'auto');
       const d = tagValue(ev, 'd');
       const image = safeUrl(tagValue(ev, 'image'));
       if (o.media && image && image.protocol === 'https:') {
         const info = parseImeta(ev).get(image.href) || { w: 0, h: 0, alt: '' };
-        card.appendChild(imageNode({ ...info, url: image.href }, ''));
+        const lead = imageNode({ ...info, url: image.href }, '');
+        lead.classList.add('nl__media--lead');
+        card.appendChild(lead);
       }
       card.appendChild(el('h' + Math.min(6, o.headingLevel + 1), 'nl__atitle', str(tagValue(ev, 'title'), 200) || d || t('article')));
       const sum = snippet(str(tagValue(ev, 'summary'), 500) || ev.content.replace(/[#*_>`[\]()!]/g, ''), 240);
@@ -1471,8 +1558,23 @@
       return card;
     }
 
+    /* videos: 'link' shows a small row and touches the network only after a click */
+    function videoLinkNode(info) {
+      const btn = el('button', 'nl__videolink');
+      btn.type = 'button';
+      btn.append(icon(['M5 3l8 5-8 5z'], 12), el('span', null, info.alt || t('playVideo')));
+      btn.addEventListener('click', () => {
+        const box = videoNode(info, t('videoLabel'), true);
+        btn.replaceWith(box);
+        const video = box.querySelector('video');
+        video.preload = 'auto';
+        video.focus();   // the visitor's click opened the player; playing is their next press
+      });
+      return btn;
+    }
+
     function noteNode(ev) {
-      const li = el('li', 'nl__item');
+      const li = el('li', 'nl__item nl__item--' + o.layout);
       const target = noteTarget(ev);
       const article = ev.kind === 30023;
 
@@ -1481,7 +1583,7 @@
       stamp.setAttribute('aria-label', `${t('openNote')}, ${absolute(ev.created_at)}`);
       stamp.appendChild(timeNode(ev.created_at));
       meta.appendChild(stamp);
-      if (article) meta.appendChild(el('span', 'nl__kind', t('article')));
+      if (article) { meta.appendChild(el('span', 'nl__kind', t('article'))); featureItems.push(li); }
       li.appendChild(meta);
 
       const bodyNode = el('div', 'nl__body');
@@ -1513,9 +1615,12 @@
         }
       }
       if (media.length) {
-        const wrap = el('div', 'nl__medialist');
+        const wrap = el('div', 'nl__medialist' + (media.length === 1 ? ' nl__medialist--one' : ''));
+        let firstVideo = true;
         for (const info of media) {
-          wrap.appendChild(info.kind === 'image' ? imageNode(info, t('imageAlt')) : videoNode(info, t('videoLabel')));
+          if (info.kind === 'image') { wrap.appendChild(imageNode(info, t('imageAlt'))); continue; }
+          wrap.appendChild(o.videos === 'link' ? videoLinkNode(info) : videoNode(info, t('videoLabel'), firstVideo));
+          firstVideo = false;
         }
         bodyNode.appendChild(wrap);
       }
@@ -1528,7 +1633,7 @@
       const count = o.layout === 'ticker' ? 1 : Math.min(o.shown, 3);
       list.replaceChildren();
       for (let i = 0; i < count; i++) {
-        const li = el('li', 'nl__item is-skel');
+        const li = el('li', 'nl__item nl__item--' + o.layout + ' nl__item--skel');
         li.setAttribute('aria-hidden', 'true');
         if (o.layout === 'ticker') li.append(skel('', '4em'), skel('', '70%'));
         else if (o.layout === 'compact') li.append(skel('', '30%'), skel('', '90%'));
@@ -1555,10 +1660,12 @@
       mentionSpots.length = 0;
       quoteSpots.length = 0;
       teaserSpots.length = 0;
+      featureItems.length = 0;
       const items = S.items.slice(0, o.shown);
       const teaser = o.layout === 'compact' || o.layout === 'ticker';
       for (const ev of items) list.appendChild(teaser ? teaserNode(ev) : noteNode(ev));
       mountList();
+      updateSpans();
       if (o.layout === 'ticker' && items.length) startTicker(items.length);
     }
 
@@ -1567,7 +1674,7 @@
     function showTick(n) {
       const nodes = [...list.children];
       tickIndex = (n + nodes.length) % nodes.length;
-      nodes.forEach((li, i) => { li.hidden = i !== tickIndex; li.classList.toggle('is-in', i === tickIndex); });
+      nodes.forEach((li, i) => { li.hidden = i !== tickIndex; li.classList.toggle('nl__item--in', i === tickIndex); });
     }
     let paused = false;
     for (const [on, off] of [['mouseenter', 'mouseleave'], ['focusin', 'focusout']]) {
@@ -1620,8 +1727,8 @@
         ['YakiHonne', `https://yakihonne.com/profile/${o.nprofile}`],
         ['Primal', `https://primal.net/p/${o.nprofile}`],
         ['njump', `https://njump.me/${o.nprofile}`]
-      ]) menu.appendChild(extLink(href, null, name));
-      const copy = el('button', null, t('copy'));
+      ]) menu.appendChild(extLink(href, 'nl__openlink', name));
+      const copy = el('button', 'nl__openlink', t('copy'));
       copy.type = 'button';
       let timer = 0;
       copy.addEventListener('click', async () => {
@@ -1636,10 +1743,12 @@
 
       const setOpen = open => { menu.hidden = !open; toggle.setAttribute('aria-expanded', String(open)); };
       toggle.addEventListener('click', () => setOpen(menu.hidden));
-      foot.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setOpen(false); toggle.focus(); } });
-      const outside = e => { if (!menu.hidden && !foot.contains(e.target)) setOpen(false); };
-      document.addEventListener('click', outside);
-      cleanups.push(() => document.removeEventListener('click', outside));
+      const onKey = e => { if (e.key === 'Escape' && !menu.hidden) { setOpen(false); toggle.focus(); } };
+      row.addEventListener('keydown', onKey);
+      menu.addEventListener('keydown', onKey);
+      if (outsideFn) document.removeEventListener('click', outsideFn);
+      outsideFn = e => { if (!menu.hidden && !foot.contains(e.target)) setOpen(false); };
+      document.addEventListener('click', outsideFn);
       foot.append(row, menu);
     }
 
@@ -1722,14 +1831,15 @@
 
       if (first.answered === 0) {
         // nobody answered: keep whatever is on screen, otherwise say so with a retry
-        if (!S.items.length) {
+        const stale = S.items.length > 0;
+        if (!stale) {
           S.shown = true;
           drawHead();
           list.replaceChildren();
           setState('error', t('error'));
           setStatus(t('error'));
         }
-        emit('nostr-live:error', { reason: 'relays', stale: S.shown, relays: o.relays.slice() });
+        emit('nostr-live:error', { reason: 'relays', stale, relays: o.relays.slice() });
         return;
       }
 
@@ -1785,6 +1895,49 @@
       emit('nostr-live:error', { reason: 'nprofile' });
     }
 
+    /* In the cards layout an article may take two columns, but only when the grid
+       really has two or more; the column count is read back from the browser. */
+    function updateSpans() {
+      if (o.layout !== 'cards') return;
+      const cols = getComputedStyle(list).gridTemplateColumns.split(' ').filter(Boolean).length;
+      const span = o.feature && cols >= 2;
+      for (const li of featureItems) li.classList.toggle('nl__item--span', span);
+    }
+    if (o.layout === 'cards' && typeof ResizeObserver === 'function') {
+      const ro = new ResizeObserver(updateSpans);
+      ro.observe(host);
+      cleanups.push(() => ro.disconnect());
+    }
+
+    /* With lang "auto" the widget follows <html lang>: strings are redrawn, nothing is refetched. */
+    function relang() {
+      setLang(o, host);
+      rtf = makeRtf();
+      foot.replaceChildren();
+      if (S.shown) {
+        render();
+        const state = host.dataset.nlState;
+        if (state === 'empty') setStatus(o.emptyText || t('empty'));
+        else if (state === 'error') setStatus(t('error'));
+      } else {
+        drawFoot();
+        host.setAttribute('aria-label', t('region', { name: 'Nostr' }));
+      }
+      if (host.dataset.nlState === 'ready') live.textContent = t('loaded');
+    }
+    if (o.langAuto && typeof MutationObserver === 'function') {
+      let last = o.lang + '|' + o.locale;
+      const mo = new MutationObserver(() => {
+        const before = last;
+        const probe = { ...o };
+        setLang(probe, host);
+        last = probe.lang + '|' + probe.locale;
+        if (last !== before) relang();
+      });
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'], subtree: true });
+      cleanups.push(() => mo.disconnect());
+    }
+
     const onVisible = () => {
       if (!document.hidden && S.shown && !observer && Date.now() - S.fetchedAt > CFG.revisit) load(true);
     };
@@ -1833,7 +1986,7 @@
     css: CSS,
     strings: STRINGS,
     // exposed for tests and for sites that want to reuse the decoders
-    _test: { bech32Decode, bech32Encode, decodeRef, parseTLV, encodeNevent, encodeNaddr, encodeNpub, verifySchnorr, verifyEvent, analyse, cleanRelay, safeUrl, wellFormed }
+    _test: { buildRelays, bech32Decode, bech32Encode, decodeRef, parseTLV, encodeNevent, encodeNaddr, encodeNpub, verifySchnorr, verifyEvent, analyse, cleanRelay, safeUrl, wellFormed }
   };
 
   if (typeof module === 'object' && module && module.exports) module.exports = api;
