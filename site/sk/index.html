@@ -50,6 +50,11 @@ code{font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-al
 .lang{margin:0 0 1rem;text-align:right;font-size:.9rem}
 .lang a[aria-current]{color:var(--fg);font-weight:600;text-decoration:none}
 footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+.nostr-live{--nl-fg:var(--fg);--nl-muted:var(--muted);--nl-card-bg:var(--card);--nl-border:var(--line);--nl-accent:var(--accent);--nl-accent-fg:var(--accent-fg);--nl-link:var(--link);--nl-radius:.75rem;--nl-media-radius:.6rem;--nl-avatar-radius:22%;--nl-gap:.9rem;--nl-avatar-size:52px;min-height:22rem}
+.nostr-live .nl__name{font-size:1.15rem}
+.nostr-live a.nl__btn--primary{color:var(--accent-fg);text-decoration:none}
+.nostr-meta code{word-break:normal;overflow-wrap:anywhere}
+.nostr-meta{color:var(--muted);font-size:.9rem;margin:1rem 0 0}
 </style>
 </head>
 <body>
@@ -84,6 +89,12 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
   </figure>
 </section>
 
+<section aria-labelledby="nostr">
+  <h2 id="nostr">Novinky z projektu</h2>
+  <div class="nostr-live" data-nostr-live data-nprofile="nprofile1qqsvzgwzkf8ztp0aqed4qnw79eu9nrywlpq23sdv0fextmxeym02ltspr3mhxue69uhkummnw3ezucmewp5x2unsw4hxktn5dajxz7gpzemhxue69uhhyetvv9ujuurjd9kkzmpwdejhgqg5waehxw309aex2mrp0yhxgctdw4eju6t0ldlj2y" data-relays="wss://nostr.cypherpunk.today,wss://relay.primal.net,wss://relay.damus.io" data-layout="cards" data-limit="4" data-lang="sk"></div>
+  <p class="nostr-meta">Príspevky sa načítavajú z verejných Nostr relayí priamo v tvojom prehliadači. NIP-05: <code>roadbeacon@cypherpunk.today</code>. Adresa na zapy: <code>roadbeacon@pay.cypherpunk.today</code></p>
+</section>
+
 <section aria-labelledby="get">
   <h2 id="get">Kde to získať</h2>
   <div class="card"><ul>
@@ -91,19 +102,6 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
     <li>Aplikácia pre Android (plugin do OsmAnd): <a href="https://zapstore.dev/apps/app.roadbeacon">Zapstore</a> alebo APK z <a href="https://github.com/jooray/roadbeacon/releases">vydaní na GitHube</a>. Cez Obtainium: <a href="obtainium://add/https://github.com/jooray/roadbeacon">pridať Roadbeacon</a>. Na zobrazenie udalostí musí byť nainštalovaný OsmAnd.</li>
     <li>Zdrojový kód: <a href="https://github.com/jooray/roadbeacon">github.com/jooray/roadbeacon</a>. Verejná doména (<a href="https://unlicense.org/">Unlicense</a>).</li>
   </ul></div>
-</section>
-
-<section aria-labelledby="nostr">
-  <h2 id="nostr">Sledujte nás na Nostri</h2>
-  <div class="card"><ul>
-    <li><a href="nostr:npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">Otvoriť v aplikácii Nostr</a></li>
-    <li><a href="https://njump.me/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">njump.me</a></li>
-    <li><a href="https://primal.net/p/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">Primal</a></li>
-    <li><a href="https://yakihonne.com/users/npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h">YakiHonne</a></li>
-    <li>NIP-05: <code>roadbeacon@cypherpunk.today</code></li>
-    <li>Adresa na zapy: <code>roadbeacon@pay.cypherpunk.today</code></li>
-  </ul>
-  <p><code>npub1cysu9vjwykzl6pjm2pxautnctxxga7zq4rq6c7njvhkdjfk747hq3q839h</code></p></div>
 </section>
 
 <section aria-labelledby="name">
@@ -114,5 +112,6 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
 <footer><div class="wrap">
   <p>Roadbeacon od Juraja Bednára. Ďalšie moje projekty: <a href="https://juraj.bednar.io/showcase/">prehľad projektov</a>.</p>
 </div></footer>
+<script src="../vendor/nostr-live.js?v=1.0.0" defer></script>
 </body>
 </html>
