@@ -128,6 +128,11 @@ class WidgetManager(
             Log.w(TAG, "Cannot find original event in cache: $pointId")
             return
         }
+        // An unverified entry from a bridge summary has no Nostr ID to vote on.
+        if (originalEvent.fromBridge) {
+            Log.i(TAG, "Not voting on an unverified bridge entry: $pointId")
+            return
+        }
 
         Log.i(TAG, "Publishing confirmation: status=${status.value} for event=$pointId")
         val event = EventSigner.createConfirmationEvent(pointId, status, privKey)

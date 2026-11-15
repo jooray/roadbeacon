@@ -351,8 +351,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
         meshCategory.addPreference(meshToNostr)
 
         val nostrToMesh = SwitchPreferenceCompat(context).apply {
-            title = "Bridge: Nostr → radio"
-            summary = "Broadcast nearby relay reports on the radio"
+            title = "Bridge: Nostr → radio (summaries)"
+            summary = "When someone nearby uses the radio, send a short unsigned summary of up to 5 relay reports: at most every 30 min per area, region-scoped, 0.1 % airtime"
             isChecked = app.settings.meshBridgeToRadio
             setOnPreferenceChangeListener { _, newValue ->
                 app.settings.meshBridgeToRadio = newValue as Boolean

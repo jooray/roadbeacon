@@ -12,5 +12,7 @@ data class RoadEvent(
     val geohashes: List<String> = emptyList(),
     val confirmCount: Int = 0,
     val denyCount: Int = 0,
-    val alreadyAlerted: Boolean = false
+    val alreadyAlerted: Boolean = false,
+    /** From a bridge summary heard on the radio: unsigned, unverified, cannot be voted on. */
+    val fromBridge: Boolean = false
 )

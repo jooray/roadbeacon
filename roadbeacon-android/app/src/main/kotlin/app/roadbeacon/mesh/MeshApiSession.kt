@@ -281,6 +281,28 @@ internal class MeshApiSession(
                 region?.takeIf { it.isNotEmpty() }?.let { put("region", it) }
             }
 
+        /** `device.radio` of a `hello` or `device` message, for the airtime estimate. */
+        fun radioParams(message: JsonObject?): RadioParams? {
+            val radio = (message?.get("device") as? JsonObject)?.get("radio") as? JsonObject ?: return null
+            val sf = (radio["sf"] as? JsonPrimitive)?.intOrNull ?: return null
+            val bw = (radio["bwHz"] as? JsonPrimitive)?.intOrNull ?: return null
+            val cr = (radio["cr"] as? JsonPrimitive)?.intOrNull ?: return null
+            if (sf !in 5..12 || bw <= 0 || cr !in 5..8) return null
+            return RadioParams(sf, bw, cr)
+        }
+
+        fun resolveParams(lat: Double, lon: Double): JsonObject = buildJsonObject {
+            put("lat", lat)
+            put("lon", lon)
+        }
+
+        /** The region name in a `regions.resolve` answer, or null for none or an error. */
+        fun resolvedRegion(response: JsonObject?): String? {
+            if (!isOk(response)) return null
+            val region = (response?.get("result") as? JsonObject)?.get("region") as? JsonObject ?: return null
+            return region.string("name")?.takeIf { it.isNotBlank() && it.length <= 64 }
+        }
+
         /** The datagram in a `channel.data` event, or null when it is not one this app reads. */
         fun datagram(event: JsonObject, channel: String, dataTypes: Collection<Int>): MeshDatagram? {
             if (event.string("type") != "channel.data") return null

@@ -246,12 +246,16 @@ class MeshCoreApiClient(
         when (message["type"]?.jsonPrimitive?.contentOrNull) {
             "hello" -> {
                 attempts = 0
+                MeshApiSession.radioParams(message)?.let { radio = it }
                 // Every authenticated connection subscribes again: a subscription does not outlive
                 // its socket.
                 perform(session.onHello(message), connection)
             }
 
-            "device" -> perform(session.onDevice(message), connection)
+            "device" -> {
+                MeshApiSession.radioParams(message)?.let { radio = it }
+                perform(session.onDevice(message), connection)
+            }
 
             "event" -> handleEvent(message)
 
@@ -328,14 +332,32 @@ class MeshCoreApiClient(
         _connected.value = value is MeshApiState.Connected
     }
 
+    /** The radio's modulation from `hello`/`device`, for the airtime budget; null until known. */
+    @Volatile override var radio: RadioParams? = null
+        private set
+
     override suspend fun send(frame: ByteArray): Boolean = sendChannelData(frame)
 
+    /**
+     * The region for a bridge summary about [lat]/[lon]: the configured flood region, or the one
+     * MeshCore Open resolves for the point. Null means no scoped send is possible, so no summary.
+     */
+    override suspend fun summaryRegion(lat: Double, lon: Double): String? {
+        settings.meshRegion.trim().ifEmpty { null }?.let { return it }
+        if (_state.value !is MeshApiState.Connected) return null
+        return MeshApiSession.resolvedRegion(request("regions.resolve", MeshApiSession.resolveParams(lat, lon)))
+    }
+
+    /** A summary: only ever with an explicit region, never the radio's default flood scope. */
+    override suspend fun sendScoped(frame: ByteArray, region: String): Boolean =
+        sendChannelData(frame, region)
+
     /** Sends one application datagram; false when the API is not connected or refused it. */
-    suspend fun sendChannelData(payload: ByteArray): Boolean {
+    suspend fun sendChannelData(payload: ByteArray, explicitRegion: String? = null): Boolean {
         if (_state.value !is MeshApiState.Connected) return false
         val connection = generation
         // Empty: MeshCore Open applies the channel's or the radio's own flood scope.
-        val region = settings.meshRegion.trim().ifEmpty { null }
+        val region = explicitRegion ?: settings.meshRegion.trim().ifEmpty { null }
         val response = request(
             "channel.sendData",
             MeshApiSession.sendParams(channelName, SEND_DATA_TYPE, payload, region)

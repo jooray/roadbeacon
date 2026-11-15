@@ -52,6 +52,16 @@ class MeshBridgeTest {
             sent += frame
             return true
         }
+
+        var region: String? = "sk-ba"
+        val scoped = mutableListOf<Pair<ByteArray, String>>()
+        override val radio = RadioParams(11, 250_000, 5)
+        override suspend fun summaryRegion(lat: Double, lon: Double): String? = region
+        override suspend fun sendScoped(frame: ByteArray, region: String): Boolean {
+            if (!accept || !connected.value) return false
+            scoped += frame to region
+            return true
+        }
     }
 
     private class FakeConfig : MeshBridgeConfig {
@@ -71,6 +81,10 @@ class MeshBridgeTest {
         val cached = mutableSetOf<String>()
         var fix: Pair<Double, Double>? = here
         var nowMs = (report.createdAt + 700) * 1000
+        val candidates = mutableListOf<SummaryPlanner.Candidate>()
+        val unverified = mutableListOf<SummaryEntry>()
+        var claimWins = true
+        val claimed = mutableListOf<Pair<String, Int>>()
         val bridge = MeshBridge(
             settings = config,
             transport = transport,
@@ -79,19 +93,25 @@ class MeshBridgeTest {
             publishToRelays = { published += it },
             position = { fix },
             reportExists = { it in cached },
-            liveReportLocation = { id ->
-                when (id) {
-                    report.id -> 48.148598 to 17.107748
-                    otherReport.id -> 48.716385 to 21.261074
-                    else -> null
-                }.takeIf { id in cached }
-            },
+            summaryCandidates = { candidates.toList() },
+            onUnverified = { entry, _ -> unverified += entry },
+            claims = BridgeClaims { area, hops -> claimed += area to hops; claimWins },
             clock = { nowMs },
             random = Random(1)
         )
 
-        fun hear(event: NostrEvent, receivedAt: String? = null) =
-            bridge.onDatagram(MeshDatagram(frame(event), 0.0, receivedAt, null))
+        fun hear(event: NostrEvent, receivedAt: String? = null, hops: Int? = null) =
+            bridge.onDatagram(MeshDatagram(frame(event), 0.0, receivedAt, hops))
+
+        fun hearRaw(payload: ByteArray, hops: Int? = 0) = bridge.onDatagram(MeshDatagram(payload, 0.0, null, hops))
+
+        /** A signed relay report [minutesOld] old, [metersNorth] of the driver. */
+        fun relayReport(id: String, minutesOld: Long, metersNorth: Int = 500, category: Int = 3) =
+            SummaryPlanner.Candidate(
+                id, MeshBridge.toE6(here.first) + metersNorth * 9, MeshBridge.toE6(here.second), category,
+                createdAt = nowMs / 1000 - minutesOld * 60, shownUntil = nowMs / 1000 + 3 * 3600,
+                stillThere = 1, gone = 0
+            ).also { candidates += it }
     }
 
     private fun frame(event: NostrEvent): ByteArray = when (event.kind) {
@@ -217,79 +237,167 @@ class MeshBridgeTest {
     }
 
     @Test
-    fun `relay events near the driver go to the radio after a pause`() = runTest {
+    fun `a relay event never goes to the radio itself, and without demand nothing does`() = runTest {
         val h = Harness(this)
         h.cached += report.id
+        h.relayReport("r1", 5)
         h.bridge.onRelayEvent(report)
-        runCurrent()
-        assertTrue(h.transport.sent.isEmpty())
-        advanceTimeBy(16_000)
-        assertEquals(1, h.transport.sent.size)
-        assertEquals(report, BinaryCodec.decode(h.transport.sent[0]))
-    }
-
-    @Test
-    fun `a relay event heard on the radio during the pause is not sent`() = runTest {
-        val h = Harness(this)
-        h.cached += report.id
-        h.bridge.onRelayEvent(report)
-        h.hear(report) // another bridge was faster
+        h.bridge.onRelayEvent(yes)
         advanceUntilIdle()
         assertTrue(h.transport.sent.isEmpty())
+        assertTrue(h.transport.scoped.isEmpty())
     }
 
     @Test
-    fun `relay to radio needs a fresh fix, a live report and 40 km`() = runTest {
+    fun `hearing a driver nearby brings one scoped summary after a hold, not the heard report`() = runTest {
+        val h = Harness(this)
+        h.relayReport("r1", 5)
+        h.relayReport(report.id, 10) // the heard one: the mesh has it already
+        h.hear(report, hops = 2)
+        runCurrent()
+        assertTrue("receiving never transmits", h.transport.sent.isEmpty() && h.transport.scoped.isEmpty())
+        advanceTimeBy(1_999)
+        assertTrue(h.transport.scoped.isEmpty())
+        advanceUntilIdle()
+        val (frame, region) = h.transport.scoped.single()
+        assertEquals("sk-ba", region)
+        assertEquals(13, frame.size)
+        val entry = BridgeSummaryCodec.decodeSummary(frame)!!.single()
+        assertEquals(3, entry.category)
+        assertEquals(1, entry.stillThere)
+        assertEquals(listOf("u2s1" to 2), h.claimed)
+        assertTrue(h.transport.sent.isEmpty())
+    }
+
+    @Test
+    fun `summaries are off by default and need the switch`() = runTest {
+        val h = Harness(this)
+        h.config.meshBridgeToRadio = false
+        h.relayReport("r1", 5)
+        h.hear(report)
+        advanceUntilIdle()
+        assertTrue(h.transport.scoped.isEmpty())
+        assertTrue(h.claimed.isEmpty())
+    }
+
+    @Test
+    fun `no region and no fix mean no summary, never a plain flood`() = runTest {
+        val noRegion = Harness(this)
+        noRegion.transport.region = null
+        noRegion.relayReport("r1", 5)
+        noRegion.hear(report)
+
         val noFix = Harness(this)
         noFix.fix = null
-        noFix.cached += report.id
-        noFix.bridge.onRelayEvent(report)
-
-        val notShown = Harness(this) // not in the cache, or no longer shown
-        notShown.bridge.onRelayEvent(report)
-
-        val far = Harness(this)
-        far.cached += otherReport.id // Košice, ~300 km away
-        far.nowMs = (otherReport.createdAt + 60) * 1000
-        far.bridge.onRelayEvent(otherReport)
+        noFix.relayReport("r1", 5)
+        noFix.hear(report)
 
         advanceUntilIdle()
-        assertTrue(noFix.transport.sent.isEmpty())
-        assertTrue(notShown.transport.sent.isEmpty())
-        assertTrue(far.transport.sent.isEmpty())
+        assertTrue(noRegion.transport.scoped.isEmpty() && noRegion.transport.sent.isEmpty())
+        assertTrue(noFix.transport.scoped.isEmpty() && noFix.transport.sent.isEmpty())
     }
 
     @Test
-    fun `relay votes use the position of the report they are about`() = runTest {
+    fun `demand from far away is not demand`() = runTest {
         val h = Harness(this)
-        h.cached += report.id
-        h.bridge.onRelayEvent(yes)
+        h.nowMs = (otherReport.createdAt + 60) * 1000
+        h.relayReport("r1", 5)
+        h.hear(otherReport) // Košice, ~300 km from the driver
         advanceUntilIdle()
-        assertEquals(yes, BinaryCodec.decode(h.transport.sent.single()))
+        assertTrue(h.transport.scoped.isEmpty())
     }
 
     @Test
-    fun `a radio event echoed by the relays is not sent back`() = runTest {
+    fun `a lost claim sends nothing and counts the area as served`() = runTest {
         val h = Harness(this)
+        h.claimWins = false
+        h.relayReport("r1", 5)
         h.hear(report)
-        h.bridge.onRelayEvent(report)
         advanceUntilIdle()
-        assertTrue(h.transport.sent.isEmpty())
+        assertTrue(h.transport.scoped.isEmpty())
+
+        h.claimWins = true
+        h.nowMs += 10 * 60_000
+        h.relayReport("r2", 1)
+        h.hear(yes)
+        advanceUntilIdle()
+        assertTrue(h.transport.scoped.isEmpty())
+        assertEquals(1, h.claimed.size)
     }
 
     @Test
-    fun `relay to radio keeps a 20 second gap`() = runTest {
+    fun `one summary per area per 30 minutes, and only with something new`() = runTest {
         val h = Harness(this)
-        h.cached += report.id
-        h.bridge.onRelayEvent(report)
-        h.bridge.onRelayEvent(yes)
+        h.relayReport("r1", 5)
+        h.hear(report)
         advanceUntilIdle()
-        assertEquals(1, h.transport.sent.size)
+        assertEquals(1, h.transport.scoped.size)
 
-        h.nowMs += 21_000
-        h.bridge.onRelayEvent(no)
+        h.nowMs += 20 * 60_000
+        h.relayReport("r2", 1)
+        h.bridge.onRelayEvent(otherReport.copy(id = "x", tags = report.tags))
         advanceUntilIdle()
-        assertEquals(2, h.transport.sent.size)
+        assertEquals(1, h.transport.scoped.size)
+
+        h.nowMs += 11 * 60_000
+        h.bridge.onRelayEvent(report)
+        advanceUntilIdle()
+        assertEquals(2, h.transport.scoped.size)
+        assertEquals(2, BridgeSummaryCodec.decodeSummary(h.transport.scoped[1].first)!!.size)
+
+        // Nothing new: no third summary even after the interval.
+        h.nowMs += 31 * 60_000
+        h.bridge.onRelayEvent(report)
+        advanceUntilIdle()
+        assertEquals(2, h.transport.scoped.size)
+    }
+
+    @Test
+    fun `a request is demand with its own filter and a 10 minute interval`() = runTest {
+        val h = Harness(this)
+        h.relayReport("police", 5, category = 0)
+        h.relayReport("accident", 3, category = 3)
+        val ask = BridgeSummaryCodec.encodeRequest(
+            SummaryRequest(MeshBridge.toE6(here.first), MeshBridge.toE6(here.second), 10, 3600, listOf(0))
+        )
+        h.hearRaw(ask)
+        advanceUntilIdle()
+        val first = BridgeSummaryCodec.decodeSummary(h.transport.scoped.single().first)!!
+        assertEquals(listOf(0), first.map { it.category })
+
+        h.nowMs += 11 * 60_000
+        h.relayReport("police2", 1, metersNorth = 900, category = 0)
+        h.hearRaw(ask)
+        advanceUntilIdle()
+        assertEquals(2, h.transport.scoped.size)
+    }
+
+    @Test
+    fun `another bridge's summary is shown unverified and covers the area`() = runTest {
+        val h = Harness(this)
+        h.relayReport("r1", 5)
+        h.hear(report)
+        runCurrent()
+        val theirs = BridgeSummaryCodec.encodeSummary(
+            MeshBridge.toE6(here.first), MeshBridge.toE6(here.second),
+            listOf(SummaryEntry(MeshBridge.toE6(here.first), MeshBridge.toE6(here.second), 0, 600, 3600))
+        )!!
+        h.hearRaw(theirs)
+        advanceUntilIdle()
+        assertTrue(h.transport.scoped.isEmpty())
+        assertEquals(0, h.unverified.single().category)
+        assertEquals("only the signed report goes to the relays", listOf(report), h.published)
+    }
+
+    @Test
+    fun `summaries and requests are never published to the relays`() = runTest {
+        val h = Harness(this)
+        h.config.meshBridgeToRadio = false
+        h.hearRaw(BridgeSummaryCodec.encodeRequest(SummaryRequest(48_150_000, 17_110_000, 0, null, emptyList())))
+        h.hearRaw(BridgeSummaryCodec.encodeSummary(48_150_000, 17_110_000, listOf(SummaryEntry(48_150_000, 17_110_000, 0, 60, 600)))!!)
+        advanceUntilIdle()
+        assertTrue(h.published.isEmpty())
+        assertTrue(h.shown.isEmpty())
     }
 
     @Test

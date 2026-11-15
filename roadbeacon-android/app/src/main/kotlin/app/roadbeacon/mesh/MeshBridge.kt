@@ -21,6 +21,23 @@ interface MeshTransport {
     fun start()
     fun stop()
     suspend fun send(frame: ByteArray): Boolean
+
+    /** The radio's modulation, for the airtime budget; null when not known. */
+    val radio: RadioParams? get() = null
+
+    /** The flood region a summary about this point may use; null = no scoped send possible. */
+    suspend fun summaryRegion(lat: Double, lon: Double): String? = null
+
+    /** Sends [frame] flooded only within [region]. */
+    suspend fun sendScoped(frame: ByteArray, region: String): Boolean = false
+}
+
+/** LoRa modulation: spreading factor, bandwidth in Hz, coding rate denominator (5..8 for 4/5..4/8). */
+data class RadioParams(val sf: Int, val bwHz: Int, val cr: Int) {
+    companion object {
+        /** What the airtime budget assumes when the radio did not say: slow, so conservative. */
+        val ASSUMED = RadioParams(11, 250_000, 5)
+    }
 }
 
 /** The switches of the MeshCore settings section, read on every decision. */
@@ -42,8 +59,11 @@ interface MeshBridgeConfig {
  *  - nothing stale or dated in the future is shown or forwarded;
  *  - an event is sent to a transport only if that transport has not seen it and
  *    this bridge has not already sent it there (bounded ledger, by event ID);
- *  - relay -> radio only carries what is still shown, near the driver, and waits a
- *    random moment first so that, of several bridges in range, usually one sends;
+ *  - relay -> radio never carries a signed event or a vote: only a short unsigned summary
+ *    ([BridgeSummaryCodec]), on demand, region-scoped, within the limits of [SummaryPlanner] and
+ *    after winning the area's claim over Nostr ([BridgeClaims]), SPECIFICATION.md 4.2-4.3;
+ *  - receiving never transmits: demand heard on the radio only schedules a later summary;
+ *  - summaries heard on the radio are shown as unverified and go nowhere else;
  *  - every direction is rate-limited, own events separately from other people's;
  *  - nothing is forwarded when the corresponding switch is off;
  *  - the author, ID and signature never change: this class never signs.
@@ -58,8 +78,11 @@ class MeshBridge(
     private val position: () -> Pair<Double, Double>? = { null },
     /** True when the report is already in the local cache. */
     private val reportExists: (String) -> Boolean = { false },
-    /** Position of a cached report that is still shown (votes included), or null. */
-    private val liveReportLocation: (String) -> Pair<Double, Double>? = { null },
+    /** Live reports from the cache that a summary could carry (verified, signed, not unverified). */
+    private val summaryCandidates: () -> List<SummaryPlanner.Candidate> = { emptyList() },
+    /** An entry of a summary heard on the radio, with MeshCore Open's receive time (ms). */
+    private val onUnverified: (SummaryEntry, Long) -> Unit = { _, _ -> },
+    private val claims: BridgeClaims = BridgeClaims { _, _ -> false },
     private val clock: () -> Long = System::currentTimeMillis,
     private val random: Random = Random.Default
 ) {
@@ -88,9 +111,9 @@ class MeshBridge(
     private val jobs = mutableListOf<Job>()
     private val radioIn = RateWindow(RADIO_IN_PER_MINUTE, 60_000)
     private val ownSends = RateWindow(OWN_PER_MINUTE, 60_000)
-    private val relaySends = RateWindow(RELAY_PER_HOUR, 3_600_000)
-    private val relaySendsByAuthor = HashMap<String, RateWindow>()
-    private var lastRelaySendAt = 0L
+    private val planner = SummaryPlanner()
+    /** Areas with a summary attempt waiting or running; one at a time per area. */
+    private val attempts = HashSet<String>()
 
     fun start() {
         transport.start()
@@ -114,6 +137,13 @@ class MeshBridge(
         if (!settings.meshReceive) return
         advanceCursor(datagram.receivedAt)
         if (!radioIn.allow(clock())) return
+        val heardAt = datagram.receivedAt?.let(::parseInstant)?.toEpochMilli()?.coerceAtMost(clock()) ?: clock()
+        when (BridgeSummaryCodec.family(datagram.payload)) {
+            BridgeSummaryCodec.SUMMARY -> return onSummary(datagram.payload, heardAt)
+            BridgeSummaryCodec.REQUEST -> return onRequest(datagram, heardAt)
+            0x00 -> Unit
+            else -> return
+        }
         val event = BinaryCodec.decode(datagram.payload) ?: return
         if (!EventSigner.verify(event)) {
             Log.w(TAG, "dropping radio event with an invalid signature")
@@ -126,6 +156,7 @@ class MeshBridge(
             if (entry.seenRadio) return
             entry.seenRadio = true
         }
+        noteDemandFrom(event, datagram.hops, heardAt)
 
         // Relays do not need the report to accept a vote, so bridging never waits.
         if (settings.meshBridgeToNostr) {
@@ -141,6 +172,33 @@ class MeshBridge(
             }
         }
         onInbound(event)
+    }
+
+    /** Another bridge's summary: shown as unverified, and its area counts as served. */
+    private fun onSummary(frame: ByteArray, heardAt: Long) {
+        val entries = BridgeSummaryCodec.decodeSummary(frame) ?: return
+        val refLat = (frame[1].toInt() shl 8 or (frame[2].toInt() and 0xFF)).toShort() * 10_000
+        val refLon = (frame[3].toInt() shl 8 or (frame[4].toInt() and 0xFF)).toShort() * 10_000
+        planner.noteServed(SummaryPlanner.areaOf(refLat, refLon), heardAt)
+        entries.forEach { onUnverified(it, heardAt) }
+    }
+
+    /** A driver asked for a summary; it is demand only if the point is near this bridge. */
+    private fun onRequest(datagram: MeshDatagram, heardAt: Long) {
+        val request = BridgeSummaryCodec.decodeRequest(datagram.payload) ?: return
+        val here = position() ?: return
+        if (distanceMeters(here, request.latE6 / 1e6 to request.lonE6 / 1e6) > SummaryPlanner.DEMAND_RADIUS_METERS) return
+        val demand = planner.noteDemand(request.latE6, request.lonE6, datagram.hops, heardAt, request)
+        scheduleSummary(demand.area)
+    }
+
+    /** Someone else used the channel near here: a summary may be useful (sent later, if at all). */
+    private fun noteDemandFrom(event: NostrEvent, hops: Int?, heardAt: Long) {
+        val here = position() ?: return
+        val where = if (event.kind == 1315) reportPosition(event) ?: return else here
+        if (distanceMeters(here, where) > SummaryPlanner.DEMAND_RADIUS_METERS) return
+        val demand = planner.noteDemand(toE6(where.first), toE6(where.second), hops, heardAt)
+        scheduleSummary(demand.area)
     }
 
     /**
@@ -224,41 +282,65 @@ class MeshBridge(
         }
     }
 
-    /** Called for events learned from the relays (after they are in the cache), when "relay -> radio" is on. */
+    /**
+     * Called for events learned from the relays (after they are in the cache). Never sends the event:
+     * a new report near an area with demand only re-checks whether a summary is due there.
+     */
     fun onRelayEvent(event: NostrEvent) {
-        if (!settings.meshEnabled || !settings.meshBridgeToRadio) return
         if (event.id.isEmpty()) return
-        synchronized(lock) {
-            val entry = ledger.getOrPut(event.id) { LedgerEntry() }
-            entry.seenRelay = true
-            if (entry.sentRadio || entry.seenRadio) return
+        synchronized(lock) { ledger.getOrPut(event.id) { LedgerEntry() }.seenRelay = true }
+        if (!summariesOn() || event.kind != 1315) return
+        val where = reportPosition(event) ?: return
+        for (demand in planner.demandedAreas(clock())) {
+            val point = demand.latE6 / 1e6 to demand.lonE6 / 1e6
+            if (distanceMeters(point, where) <= SummaryPlanner.DEMAND_RADIUS_METERS) scheduleSummary(demand.area)
         }
-        if (isStale(event)) return
-        val frame = encode(event) ?: return
+    }
 
-        // Only what is still on the map: a report itself, or the report a vote is about.
-        val reportId = if (event.kind == 1316) event.tags[0][1] else event.id
-        val where = liveReportLocation(reportId) ?: return
-        val here = position() ?: return
-        if (distanceMeters(here, where) > RELAY_RADIUS_METERS) return
+    /** True when the bridge may consider a summary for the radio at all. */
+    private fun summariesOn() = settings.meshEnabled && settings.meshBridgeToRadio
 
-        val now = clock()
-        synchronized(lock) {
-            if (now - lastRelaySendAt < RELAY_GAP_MS) return
-            val byAuthor = relaySendsByAuthor.getOrPut(event.pubkey) {
-                RateWindow(RELAY_PER_AUTHOR_PER_HOUR, 3_600_000)
-            }
-            if (!byAuthor.wouldAllow(now) || !relaySends.allow(now)) return
-            byAuthor.allow(now)
-            if (relaySendsByAuthor.size > MAX_LEDGER) relaySendsByAuthor.clear()
-            lastRelaySendAt = now
-        }
+    /** Plans one summary attempt for [area] after the 2-10 s hold, unless one is already waiting. */
+    private fun scheduleSummary(area: String) {
+        if (!summariesOn()) return
+        if (planner.ready(area, clock()) == null) return
+        synchronized(lock) { if (!attempts.add(area)) return }
         scope.launch {
-            // Listen before talking: another bridge in range may put it on the air first.
-            delay(RELAY_HOLD_MIN_MS + random.nextLong(RELAY_HOLD_SPREAD_MS))
-            val heard = synchronized(lock) { ledger[event.id]?.let { it.seenRadio || it.sentRadio } == true }
-            if (!heard) send(event, frame, backlogOnFailure = false)
+            try {
+                delay(SUMMARY_HOLD_MIN_MS + random.nextLong(SUMMARY_HOLD_SPREAD_MS))
+                trySummary(area)
+            } finally {
+                synchronized(lock) { attempts.remove(area) }
+            }
         }
+    }
+
+    private suspend fun trySummary(area: String) {
+        if (!summariesOn() || !transport.connected.value) return
+        val started = clock()
+        val demand = planner.ready(area, started) ?: return
+        val here = position() ?: return
+        val point = demand.latE6 / 1e6 to demand.lonE6 / 1e6
+        if (distanceMeters(here, point) > SummaryPlanner.DEMAND_RADIUS_METERS) return
+        val candidates = summaryCandidates().filter { c ->
+            !c.id.startsWith("bridge:") &&
+                synchronized(lock) { ledger[c.id]?.let { it.seenRadio || it.sentRadio } != true }
+        }
+        val plan = planner.select(demand, candidates, started) ?: return
+        val frame = BridgeSummaryCodec.encodeSummary(demand.latE6, demand.lonE6, plan.entries) ?: return
+        // Zero-hop is not offered by the local API, so a summary is region-scoped or not sent at all.
+        val region = transport.summaryRegion(point.first, point.second) ?: return
+        val radio = transport.radio ?: RadioParams.ASSUMED
+        val airtime = BridgeSummaryCodec.airtimeMs(radio.sf, radio.bwHz, radio.cr, BridgeSummaryCodec.packetBytes(frame.size, region = true))
+        if (!planner.budgetAllows(airtime, clock())) return
+        if (!claims.claim(area, demand.hops ?: 255)) {
+            planner.noteServed(area, clock())
+            return
+        }
+        // Another bridge's summary for this area heard while waiting: it is covered.
+        if ((planner.lastSummary(area) ?: 0L) >= started) return
+        if (!summariesOn()) return
+        if (transport.sendScoped(frame, region)) planner.recordSent(plan, airtime, clock())
     }
 
     private suspend fun send(event: NostrEvent, frame: ByteArray, backlogOnFailure: Boolean) {
@@ -267,6 +349,12 @@ class MeshBridge(
         } else if (backlogOnFailure) {
             backlog(event)
         }
+    }
+
+    private fun reportPosition(event: NostrEvent): Pair<Double, Double>? {
+        val lat = event.tags.firstOrNull { it.size == 2 && it[0] == "lat" }?.get(1)?.toDoubleOrNull() ?: return null
+        val lon = event.tags.firstOrNull { it.size == 2 && it[0] == "lon" }?.get(1)?.toDoubleOrNull() ?: return null
+        return lat to lon
     }
 
     private fun encode(event: NostrEvent): ByteArray? = when (event.kind) {
@@ -320,17 +408,15 @@ class MeshBridge(
         private const val OWN_PER_MINUTE = 6
         private const val MAX_OWN_BACKLOG = 20
         private const val OWN_BACKLOG_TTL_MS = 60 * 60 * 1000L
-        private const val RELAY_PER_HOUR = 20
-        private const val RELAY_PER_AUTHOR_PER_HOUR = 4
-        private const val RELAY_GAP_MS = 20_000L
-        private const val RELAY_HOLD_MIN_MS = 3_000L
-        private const val RELAY_HOLD_SPREAD_MS = 12_000L
-        private const val RELAY_RADIUS_METERS = 40_000.0
+        private const val SUMMARY_HOLD_MIN_MS = 2_000L
+        private const val SUMMARY_HOLD_SPREAD_MS = 8_000L
         private const val MAX_PARKED_VOTES = 64
         private const val MAX_PARKED_REPORTS = 32
         private const val PARKED_TTL_MS = 15 * 60 * 1000L
         private const val MAX_FUTURE_SKEW_SECONDS = 300L
         private const val MAX_VOTE_AGE_SECONDS = 30 * 86_400L
+
+        internal fun toE6(degrees: Double): Int = Math.round(degrees * 1_000_000).toInt()
 
         private fun parseInstant(text: String): Instant? =
             try { Instant.parse(text) } catch (_: Exception) { null }

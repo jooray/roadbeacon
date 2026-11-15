@@ -17,6 +17,9 @@ import app.roadbeacon.model.*
 import app.roadbeacon.nostr.*
 import app.roadbeacon.mesh.MeshBridge
 import app.roadbeacon.mesh.MeshCoreApiClient
+import app.roadbeacon.mesh.NostrBridgeClaims
+import app.roadbeacon.mesh.SummaryEntry
+import app.roadbeacon.mesh.SummaryPlanner
 import app.roadbeacon.osmand.MapLayerManager
 import app.roadbeacon.osmand.OsmandAidlHelper
 import app.roadbeacon.osmand.WidgetManager
@@ -47,6 +50,8 @@ class RoadbeaconService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val SUBSCRIPTION_DEBOUNCE_MS = 5000L
         private const val MESH_FIX_MAX_AGE_MS = 10 * 60 * 1000L
+        /** An unverified bridge entry and a signed report of the same category this close are one. */
+        private const val SAME_SPOT_METERS = 100.0
 
         const val ACTION_START = "app.roadbeacon.action.START"
         const val ACTION_STOP = "app.roadbeacon.action.STOP"
@@ -123,9 +128,15 @@ class RoadbeaconService : Service() {
                     ?.let { it.lat to it.lon }
             },
             reportExists = { id -> eventCache.getReport(id) != null },
-            liveReportLocation = { id ->
-                eventCache.getAllActiveReports().firstOrNull { it.id == id }?.let { it.lat to it.lon }
-            }
+            summaryCandidates = { summaryCandidates() },
+            onUnverified = { entry, heardAtMs -> handleUnverifiedEntry(entry, heardAtMs) },
+            claims = NostrBridgeClaims(
+                events = nostrClient.events,
+                subscribe = { nostrClient.subscribe(it) },
+                close = { nostrClient.closeSubscription(it) },
+                publish = { nostrClient.publish(it) },
+                connectedRelays = { nostrClient.getConnectedCount() }
+            )
         )
         app.meshClient = client
         app.meshBridge = bridge
@@ -294,6 +305,7 @@ class RoadbeaconService : Service() {
         when (event.kind) {
             1315 -> handleReportEvent(event)
             1316 -> handleConfirmationEvent(event)
+            else -> return  // bridge claims (21315) are read by the bridge itself
         }
         // Offer relay events to the radio when "relay -> radio" is on; after the cache has them,
         // so the bridge sees whether the report is still shown.
@@ -346,6 +358,11 @@ class RoadbeaconService : Service() {
         )
 
         Log.d(TAG, "Adding event to cache: ${type.typeName} at $lat,$lon")
+        // A signed report replaces what a bridge summary said about the same spot.
+        unverifiedNear(type, lat, lon).forEach { stale ->
+            eventCache.removeReport(stale.id)
+            mapLayerManager.removeEvent(stale.id)
+        }
         eventCache.addReport(roadEvent)
         mapLayerManager.addOrUpdateEvent(roadEvent)
         subscribeToConfirmations()
@@ -386,10 +403,67 @@ class RoadbeaconService : Service() {
         }
     }
 
+    /** Live signed reports a bridge summary could carry; the bridge filters what the radio has. */
+    private fun summaryCandidates(): List<SummaryPlanner.Candidate> {
+        val now = System.currentTimeMillis() / 1000
+        return eventCache.getAllActiveReports().filter { !it.fromBridge }.map { report ->
+            val votes = eventCache.admissible(report, eventCache.getConfirmations(report.id), now)
+            SummaryPlanner.Candidate(
+                id = report.id,
+                latE6 = MeshBridge.toE6(report.lat),
+                lonE6 = MeshBridge.toE6(report.lon),
+                category = report.type.value,
+                createdAt = report.createdAt,
+                shownUntil = eventCache.computeEffectiveExpiry(report, votes, now),
+                stillThere = report.confirmCount,
+                gone = report.denyCount
+            )
+        }
+    }
+
+    private fun unverifiedNear(type: EventType, lat: Double, lon: Double): List<RoadEvent> =
+        eventCache.getAllActiveReports().filter {
+            it.fromBridge && it.type == type && MeshBridge.distanceMeters(it.lat to it.lon, lat to lon) <= SAME_SPOT_METERS
+        }
+
+    /**
+     * One report of a bridge summary heard on the radio: shown as unverified. It has no author or
+     * Nostr ID, so it is never voted on, published or sent anywhere; a signed report of the same
+     * category within 100 m wins over it.
+     */
+    private fun handleUnverifiedEntry(entry: SummaryEntry, heardAtMs: Long) {
+        val type = EventType.fromValueOrNull(entry.category) ?: return
+        val lat = entry.latE6 / 1e6
+        val lon = entry.lonE6 / 1e6
+        val signed = eventCache.getAllActiveReports().any {
+            !it.fromBridge && it.type == type && MeshBridge.distanceMeters(it.lat to it.lon, lat to lon) <= SAME_SPOT_METERS
+        }
+        if (signed) return
+        val heardAt = heardAtMs / 1000
+        val roadEvent = RoadEvent(
+            id = entry.localId,
+            pubkey = "",
+            type = type,
+            lat = lat,
+            lon = lon,
+            createdAt = heardAt - entry.ageSeconds,
+            expiration = heardAt + entry.remainingSeconds,
+            confirmCount = entry.stillThere,
+            denyCount = entry.gone,
+            fromBridge = true
+        )
+        if (roadEvent.expiration <= System.currentTimeMillis() / 1000) return
+        // The next summary about the same report refreshes it without alerting twice.
+        val stored = roadEvent.copy(alreadyAlerted = eventCache.getReport(roadEvent.id)?.alreadyAlerted == true)
+        eventCache.addReport(stored)
+        mapLayerManager.addOrUpdateEvent(stored)
+    }
+
     private fun subscribeToConfirmations() {
         confirmSubId?.let { nostrClient.closeSubscription(it) }
 
-        val eventIds = eventCache.getAllActiveReports().map { it.id }
+        // Unverified bridge entries have no Nostr ID to vote on.
+        val eventIds = eventCache.getAllActiveReports().filter { !it.fromBridge }.map { it.id }
         if (eventIds.isEmpty()) {
             Log.d(TAG, "subscribeToConfirmations: no event IDs, subscription cleared")
             confirmSubId = null

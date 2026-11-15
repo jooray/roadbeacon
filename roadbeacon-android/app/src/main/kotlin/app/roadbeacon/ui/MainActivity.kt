@@ -283,6 +283,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun publishConfirmation(event: RoadEvent, status: ConfirmationStatus) {
+        if (event.fromBridge) {
+            Toast.makeText(this, "From a bridge, unverified: it cannot be voted on", Toast.LENGTH_SHORT).show()
+            return
+        }
         val privKey = app.keyStore.getPrivateKey()
         if (privKey == null) {
             Toast.makeText(this, "No key configured", Toast.LENGTH_SHORT).show()

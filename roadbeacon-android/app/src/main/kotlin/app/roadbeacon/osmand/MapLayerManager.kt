@@ -74,6 +74,7 @@ class MapLayerManager(private val aidlHelper: OsmandAidlHelper) {
                 append(event.content)
             }
             append("\nConfirm: ${event.confirmCount} | Deny: ${event.denyCount}")
+            if (event.fromBridge) append("\nFrom a bridge, unverified")
         }
 
         val params = mutableMapOf<String, String>()
