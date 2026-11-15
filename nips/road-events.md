@@ -353,6 +353,16 @@ protocol), with:
 - payload: 117–163 bytes for a report (up to 165 accepted), 134 for a vote. A comment longer than
   46 bytes keeps a report relay-only; radio-first clients should keep comments short.
 
+Only the author's device puts signed frames on the radio. A bridge does not retransmit events it
+learned from the relays: it may send a short, unsigned **bridge summary** (first byte `0x10`, 13–45
+bytes, up to five reports) to an area where it recently heard mesh users, or answer a 13-byte
+**summary request** (`0x20`). Both share `data_type` `0x0150`; their first byte has a non-zero high
+nibble, which every version-0 decoder refuses, so older clients drop them. Receivers show summary
+entries as unverified, never vote on them and never publish them. Frame layout, policy (off by
+default, on demand only, zero-hop or region-scoped, 0.1 % airtime, one bridge per area agreed over
+Nostr with ephemeral kind 21315) and vectors are in [`SPECIFICATION.md`](../SPECIFICATION.md)
+sections 4.2–4.3 and `vectors/road-bridge-v1.json`.
+
 A sender uses the radio's own flood scope (region) by default. Narrowing it to a named region is a
 local choice of the sending node; it changes which repeaters forward the datagram, not its bytes.
 

@@ -70,10 +70,12 @@ A node with internet may bridge in either direction. It never signs and never ch
 
 * **radio → relays**: publish the rebuilt event unchanged, with the original author, ID and
   signature (subject to the receive limit below).
-* **relays → radio**: only an event that encodes exactly, whose report is still on the map (votes
-  included) and lies within 40 km of a position fix younger than 10 minutes. A vote uses its report's
-  position. The bridge then waits 3–15 s at random and sends only if the event has not been heard on
-  the radio meanwhile, so that of several bridges in range usually one transmits.
+* **relays → radio**: never the signed event and never a vote. Off by default; when the user turns
+  it on, the bridge sends a **bridge summary** (13–45 bytes, up to five reports, unsigned, shown as
+  "from a bridge, unverified") only to an area where it heard someone on the radio in the last two
+  hours or that sent a 13-byte request, at most once per 30 minutes per area, zero-hop or
+  region-scoped (never a plain flood), within 0.1 % airtime per hour, and only if it wins the claim
+  for the area over Nostr (ephemeral kind 21315). Frames and rules: `SPECIFICATION.md` 4.2–4.3.
 * **own events → radio**: sent when made; while the radio is away they wait (up to 20, at most an
   hour) and go out when it comes back.
 
@@ -87,8 +89,8 @@ Limits (Roadbeacon; Roadstr uses the same numbers):
 | Limit | Value |
 |---|---|
 | own events to radio | 6 / min, backlog 20 for up to 1 h |
-| relay events to radio | 20 / h, 4 / author / h, 20 s gap, random 3–15 s hold |
-| relay events put on radio | within 40 km of a fix younger than 10 min |
+| relay events to radio | summaries only: on demand (2 h), 1 per area (geohash 4) per 30 min (10 min after a request), 6 / h, 0.1 % airtime / h, 2–10 s hold, Nostr claim 1.5 s |
+| summary area | within 25 km of a fix younger than 10 min; zero-hop or region, else nothing |
 | frames accepted from radio | 60 / min |
 | votes waiting for their report | 64 (32 reports), 15 min |
 
@@ -167,7 +169,10 @@ additions to protocol 1), upstream issue [zjs81/meshcore-open#616](https://githu
 * Codec: Roadbeacon runs the shared vectors (`nips/vectors/road-events-v1.json`) on Android and web;
   Roadstr runs the same file.
 * Bridge: `MeshBridgeTest` (fake radio, signed vector events): verification, dedupe, parking,
-  staleness, cursor, backlog, relay→radio area/hold/gap, receive limit.
+  staleness, cursor, backlog, receive limit, and relay→radio summaries (demand, hold, interval,
+  region only, lost claim, another bridge's summary, nothing published). `SummaryPlannerTest` and
+  `BridgeSummaryVectorsTest` cover the planner limits and `nips/vectors/road-bridge-v1.json`.
+  Roadstr runs the same file.
 * Local API: server tests in MeshCore Open against a fake host; `MeshApiSessionTest` for the
   client's decisions (radio state, one subscription per connection, join, denial pause, fallback
   retry, data types, region, hops).

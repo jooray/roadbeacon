@@ -155,6 +155,169 @@ change author, ID or signature, must de-duplicate by event ID across transports,
 both directions. See the NIP for parameters and `docs/ecosystem.md` for the bridge design and the
 hardware checklist.
 
+Signed frames go on the radio only from their author's device (and back to the relays from any
+bridge). What a bridge learned from the relays goes on the radio only as the bridge summary of
+section 4.2, never as a full frame, and never as a vote.
+
+### 4.2 Bridge summary (relays → mesh)
+
+A full report on the radio is a 133–181 byte packet that floods the whole mesh, and 96 bytes of it
+are the author's key and signature. A driver who only has the mesh gains nothing from them when the
+report came from the internet: the bridge could have invented it either way. So a bridge does not
+retransmit relay events. It sends a short summary of what is on the relays near someone who is
+using the mesh, signed by nobody, and receivers show it as **from a bridge, unverified**.
+
+#### Frame family
+
+All mesh frames of this protocol use `data_type` `0x0150`. The high nibble of the first byte
+selects the family; frames of version 0 (section 4) always have it 0, and their decoders refuse any
+other value (`BAD_VERSION`), so older apps drop the new frames unread.
+
+| First byte | Frame |
+|---|---|
+| `0x00`–`0x0F` | signed report or vote (section 4) |
+| `0x10` | bridge summary, version 0 |
+| `0x20` | summary request, version 0 |
+| other | reserved; drop |
+
+The low nibble of `0x10` and `0x20` is the family's version, 0 here; a decoder drops any other
+value. No new `data_type` is needed. MeshCore pads `data_type` (2), length (1) and the content to
+16-byte blocks, so content of 13, 29 or 45 bytes wastes nothing; both new frames are sized for that.
+
+#### Summary frame (`0x10`, 13 + 8·k bytes for k = 0…4, so 1–5 entries)
+
+```
+Offset  Size  Field
+0       1     0x10
+1       2     ref latitude  (int16, 0.01 degree units, -9000..9000)
+3       2     ref longitude (int16, 0.01 degree units, -18000..18000)
+5       8·n   n entries, 1 <= n <= 5:
+  +0    2     latitude offset  (int16, 0.00001 degree units)
+  +2    2     longitude offset (int16, 0.00001 degree units)
+  +4    1     category (registry value, section 3.4)
+  +5    1     age: time since the report's created_at (duration code)
+  +6    1     remaining: time until the report stops being shown (duration code)
+  +7    1     votes: high nibble "still there" count, low nibble "gone" count, each capped at 15
+```
+
+Integers are big-endian. The content is 5 + 8·n bytes: 13, 21, 29, 37 or 45. One, three and five
+entries fill the padding blocks exactly; two or four cost the same airtime as three or five.
+
+Coordinates are exact integer arithmetic on the report's degrees × 10^6 values:
+`ref = round(point × 100)` for the point the summary is about, `offset = round((E6 − ref × 10000) / 10)`
+(round half away from zero), and the receiver's `E6 = ref × 10000 + offset × 10`. The offset range
+±32767 is ±0.32767°, about ±36 km north–south; a report that does not fit is left out of that
+summary. The error is under 1 m.
+
+The votes byte is the state of the report as the bridge sees it on the relays, not the votes
+themselves. Votes are never put on the radio by a bridge (section 4.3).
+
+**Duration code** (one byte, rounded down to the nearest representable value):
+
+| Code | Meaning |
+|---|---|
+| 0–59 | 0–59 minutes |
+| 60–82 | 1–23 hours (code − 59) |
+| 83–112 | 1–30 days (code − 82) |
+| 113–254 | reserved; the decoder drops the entry |
+| 255 | more than 30 days (age only) |
+
+Decoders drop the whole frame on a bad first byte, a length that is not 5 + 8·n with 1 ≤ n ≤ 5, or
+a reference outside its range. They drop one entry for a reserved category, a reserved duration
+code, `remaining` = 0 or 255, an age longer than the category's lifetime, or a position outside
+±90 / ±180 degrees.
+
+#### Request frame (`0x20`, 13 bytes)
+
+A driver with the mesh but no internet may ask for a summary. Clients send it only when the user
+asks, or automatically at most once per 30 minutes, and never while they have relays.
+
+```
+Offset  Size  Field
+0       1     0x20
+1       2     latitude  (int16, 0.01 degree units): the point of interest
+3       2     longitude (int16, 0.01 degree units)
+5       1     radius in km, 1..25 (0 = the bridge's default, 25)
+6       1     since: only reports younger than this (duration code; 255 = any age)
+7       2     category mask: bit i = category i (0..13), bit 15 = other (255); 0 = all
+9       4     reserved, zero
+```
+
+Decoders drop a request whose reserved bytes are not zero, whose radius is over 25, or whose
+point is out of range. The point is rounded to about 1 km, which is all the bridge needs and all a
+driver should give away on a public channel.
+
+### 4.3 Bridge policy for relays → mesh
+
+Everything here is a hard rule for an implementation, not a tuning default, unless it says so.
+
+1. **Off by default.** A bridge sends summaries only when the user turned on *relay → radio*. Own
+   reports and votes (from the driver's device) are a separate switch and are not affected.
+2. **Only on demand.** A summary is sent only for an area where, within the last **2 hours**, the
+   bridge heard on the radio (not from its own sends):
+   - a signed report or vote (section 4) from another node, with the report's position, or for a
+     vote the bridge's own position, within 25 km of the bridge's position fix (at most 10 minutes
+     old); or
+   - a request frame whose point is within 25 km of the bridge.
+
+   Summary frames from other bridges are not demand. Without a fresh position fix the bridge sends
+   nothing.
+3. **Area and interval.** The area is the geohash-4 cell (about 20 × 39 km) of the demand point. A
+   bridge sends at most one summary per area per **30 minutes**, or per **10 minutes** when a
+   request asked for it. An area is also counted as served for the same time when another bridge's
+   summary for it is heard on the radio, or another bridge won the claim for it (rule 7).
+4. **Content.** Up to 5 reports that the bridge verified from the relays, still shown for at least
+   5 more minutes, within 25 km of the demand point (or the request's radius) and inside the offset
+   range. Left out: reports heard on the radio (the mesh already has them), reports outside the
+   request's `since` and category mask, and votes in any form. Newest first. A summary is sent only
+   if at least one entry was not in a summary for this area in the last 2 hours; repeats may fill
+   the remaining slots. The bridge sends 1, 3 or 5 entries when it can (no padding waste).
+5. **Never a plain flood.** The bridge sends **zero-hop** where its radio link allows it (companion
+   `CMD_SEND_CHANNEL_DATA` with `path_len` 0) and the demand was heard at 0 hops. Otherwise it sends
+   **region-scoped**: the flood region the user configured, or else the one MeshCore Open resolves
+   for the demand point (`regions.resolve`). With neither, it does not send. MeshCore Open's local
+   API has no zero-hop option yet, so through it summaries are always region-scoped.
+6. **Airtime budget.** At most **0.1 % of each rolling hour** (3.6 s) of the bridge's own
+   transmissions for summaries, computed from the LoRa time-on-air of the whole packet (5 bytes of
+   header, the 16-byte blocks, 4 bytes of region code) with the radio's spreading factor, bandwidth
+   and coding rate (SF11, 250 kHz, 4/5 when unknown), MeshCore's preamble (32 symbols up to SF8, 16
+   above), explicit header and CRC, and at most 6 summaries per hour. The formula and worked values
+   are in the vectors. A 45-byte summary at SF11/250 kHz is about 0.7 s, so the budget allows about 5.
+7. **One bridge per area, agreed over Nostr.** Before sending, the bridge publishes an ephemeral
+   claim event (kind **21315**) on its relays:
+
+   ```json
+   {"kind": 21315, "content": "", "tags": [["g", "<geohash-4 area>"], ["hops", "<n>"], ["expiration", "<now + 120>"]]}
+   ```
+
+   `hops` is the hop count at which the bridge heard the demand (255 when unknown). The claim is
+   signed by a random key the bridge makes when it starts and never reuses: neither the driver's
+   identity nor a stable bridge identity is tied to a place. The bridge waits **1.5 s**, collecting
+   claims for the same area created from 60 s before its own claim to 5 s after. The winner has the
+   fewest hops; on a tie, the lowest `SHA-256(pubkey bytes ‖ area as UTF-8)`, compared as unsigned
+   bytes. Only the winner sends; the others count the area as served (rule 3). A bridge that cannot
+   reach a relay has nothing from the relays to summarise and sends nothing.
+8. **Before sending** the bridge waits 2–10 s at random after the demand, so that it does not answer
+   on top of the frame that asked, and drops the summary if another bridge's summary for the area is
+   heard meanwhile.
+9. **Uplink is unchanged and silent.** Receiving and bridging radio → relays never transmits on the
+   radio. Demand only schedules a later summary under the rules above. Summaries and requests are
+   never published to the relays.
+
+#### Receiving a summary
+
+Each entry becomes a report shown as **from a bridge, unverified**: position from the frame,
+`created_at` = receive time − age, shown until receive time + remaining, the votes byte as its
+counts. It has no author, no Nostr ID and no signature, so it cannot be voted on, is never
+published, never re-sent and never counts as heard on the radio. Its local ID is
+`bridge:` + the first 16 hex digits of `SHA-256(category ‖ E6 lat ‖ E6 lon)` (one byte, two int32
+big-endian), so the same report from the next summary replaces the earlier entry. An entry is
+ignored when a verified report of the same category is within 100 m, and a verified report that
+arrives later replaces any unverified entry of the same category within 100 m.
+
+Conformance vectors: [`nips/vectors/road-bridge-v1.json`](nips/vectors/road-bridge-v1.json), made
+by `tools/gen_road_bridge_vectors.py`.
+
 ## 5. Expiration & Confirmation System
 
 Two lifetimes, often confused:

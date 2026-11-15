@@ -18,7 +18,8 @@ The review in this session found and fixed, in all three repos:
 * **Votes:** one voice per key, future-skew and tie rules now implemented on Android and web too;
   Roadstr no longer rejects every vote (a location check left over from the old layout) and no
   longer hides 30-day reports at day 14 (radio path).
-* **Bridges:** relay→radio only for live reports near a fresh fix, with a listen-before-talk hold;
+* **Bridges:** relay→radio only as unsigned bridge summaries on demand (SPECIFICATION.md 4.2–4.3,
+  since 2026-11-16; earlier builds forwarded live signed reports near a fresh fix);
   radio input limit; parked votes released from either source; own-event backlog; replay cursor =
   server `receivedAt`; clients sign `meshcore-open-pair-v1:<nonce>` themselves once per connection,
   re-subscribe on every hello, show their fingerprint.
