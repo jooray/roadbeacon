@@ -17,7 +17,9 @@ fun interface BridgeClaims {
 
 /**
  * One bridge per area, agreed over Nostr (SPECIFICATION.md 4.3, rule 7): publish an ephemeral
- * kind 21315 claim, listen 1.5 s, and the fewest hops, then the lowest SHA-256(pubkey ‖ area), wins.
+ * kind 21315 claim, listen 1.5 s, claim again (relays keep no ephemeral events, so a late
+ * subscriber missed the first), listen 0.3 s more; the fewest hops, then the lowest
+ * SHA-256(pubkey ‖ area), wins.
  *
  * The claim key is random, made once per bridge start and kept only in memory, so a claim links
  * neither the driver's identity nor a stable bridge identity to a place.
@@ -35,44 +37,50 @@ class NostrBridgeClaims(
     override suspend fun claim(area: String, hops: Int): Boolean {
         if (connectedRelays() == 0) return false
         val now = nowSeconds()
-        val own = EventSigner.sign(
+        fun claimAt(at: Long) = EventSigner.sign(
             NostrEvent(
-                createdAt = now,
+                createdAt = at,
                 kind = KIND_CLAIM,
                 tags = listOf(
                     listOf("g", area),
                     listOf("hops", hops.coerceIn(0, 255).toString()),
-                    listOf("expiration", (now + EXPIRATION_SECONDS).toString())
+                    listOf("expiration", (at + EXPIRATION_SECONDS).toString())
                 ),
                 content = ""
             ),
             key
         )
+        val own = claimAt(now)
         val heard = mutableListOf(own)
         val sub = subscribe(NostrFilter(kinds = listOf(KIND_CLAIM), gTags = listOf(area), since = now - WINDOW_BEFORE_SECONDS))
         try {
             coroutineScope {
                 val listener = launch {
                     events.collect { event ->
-                        if (event.kind == KIND_CLAIM && event.id != own.id && areaOf(event) == area) {
+                        if (event.kind == KIND_CLAIM && event.pubkey != own.pubkey && areaOf(event) == area) {
                             synchronized(heard) { heard += event }
                         }
                     }
                 }
                 publish(own)
                 delay(LISTEN_MS)
+                // Relays do not store ephemeral events: a bridge that subscribed after the first
+                // claim never saw it. Saying it again lets both sides compare the same set.
+                publish(claimAt(now + 1))
+                delay(GRACE_MS)
                 listener.cancel()
             }
         } finally {
             close(sub)
         }
         val winner = synchronized(heard) { winner(heard.toList(), area, now) }
-        return winner?.id == own.id
+        return winner?.pubkey == own.pubkey
     }
 
     companion object {
         const val KIND_CLAIM = 21315
         const val LISTEN_MS = 1_500L
+        const val GRACE_MS = 300L
         const val WINDOW_BEFORE_SECONDS = 60L
         const val WINDOW_AFTER_SECONDS = 5L
         const val EXPIRATION_SECONDS = 120L

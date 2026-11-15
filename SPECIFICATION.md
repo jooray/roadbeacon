@@ -292,8 +292,11 @@ Everything here is a hard rule for an implementation, not a tuning default, unle
 
    `hops` is the hop count at which the bridge heard the demand (255 when unknown). The claim is
    signed by a random key the bridge makes when it starts and never reuses: neither the driver's
-   identity nor a stable bridge identity is tied to a place. The bridge waits **1.5 s**, collecting
-   claims for the same area created from 60 s before its own claim to 5 s after. The winner has the
+   identity nor a stable bridge identity is tied to a place. The bridge subscribes to claims for the
+   area before publishing, waits **1.5 s**, then publishes the claim once more (same key and tags,
+   `created_at` + 1) and waits **0.3 s** more: relays do not store ephemeral events, so a bridge
+   that subscribed after the first claim only sees the second. It counts claims for the same area
+   created from 60 s before its first claim to 5 s after, one per key. The winner has the
    fewest hops; on a tie, the lowest `SHA-256(pubkey bytes ‖ area as UTF-8)`, compared as unsigned
    bytes. Only the winner sends; the others count the area as served (rule 3). A bridge that cannot
    reach a relay has nothing from the relays to summarise and sends nothing.
