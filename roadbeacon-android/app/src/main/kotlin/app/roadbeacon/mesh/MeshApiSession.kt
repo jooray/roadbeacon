@@ -272,14 +272,30 @@ internal class MeshApiSession(
                 since?.let { put("since", it) }
             }
 
-        /** Without a [region] MeshCore Open uses the channel's or the radio's own flood scope. */
-        fun sendParams(channel: String, dataType: Int, payload: ByteArray, region: String?): JsonObject =
+        /**
+         * Without a [region] MeshCore Open uses the channel's or the radio's own flood scope.
+         * [zeroHop] sends `"path": ""` (meshcored DESIGN.md 5.5); only for a server with
+         * [CAP_TX_PATH_DATA], since an older one ignores the field and floods.
+         */
+        fun sendParams(channel: String, dataType: Int, payload: ByteArray, region: String?, zeroHop: Boolean = false): JsonObject =
             buildJsonObject {
                 put("channel", channel)
                 put("dataType", dataType)
                 put("payload", Base64.getEncoder().encodeToString(payload))
-                region?.takeIf { it.isNotEmpty() }?.let { put("region", it) }
+                if (zeroHop) put("path", "")
+                else region?.takeIf { it.isNotEmpty() }?.let { put("region", it) }
             }
+
+        /** Send with a path (zero-hop, direct) in `channel.sendData`. */
+        const val CAP_TX_PATH_DATA = "tx_path_data"
+
+        /** `capabilities` of a `hello` (top level or under `server`), or null when not given. */
+        fun capabilities(message: JsonObject?): Set<String>? {
+            val list = (message?.get("capabilities") as? JsonArray)
+                ?: ((message?.get("server") as? JsonObject)?.get("capabilities") as? JsonArray)
+                ?: return null
+            return list.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet()
+        }
 
         /** `device.radio` of a `hello` or `device` message, for the airtime estimate. */
         fun radioParams(message: JsonObject?): RadioParams? {

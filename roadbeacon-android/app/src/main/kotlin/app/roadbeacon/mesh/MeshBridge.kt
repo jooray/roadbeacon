@@ -30,6 +30,12 @@ interface MeshTransport {
 
     /** Sends [frame] flooded only within [region]. */
     suspend fun sendScoped(frame: ByteArray, region: String): Boolean = false
+
+    /** True when [sendZeroHop] works (MeshCore Open with `tx_path_data`). */
+    val zeroHopCapable: Boolean get() = false
+
+    /** Sends [frame] to direct neighbours only; nothing repeats it. */
+    suspend fun sendZeroHop(frame: ByteArray): Boolean = false
 }
 
 /** LoRa modulation: spreading factor, bandwidth in Hz, coding rate denominator (5..8 for 4/5..4/8). */
@@ -328,10 +334,12 @@ class MeshBridge(
         }
         val plan = planner.select(demand, candidates, started) ?: return
         val frame = BridgeSummaryCodec.encodeSummary(demand.latE6, demand.lonE6, plan.entries) ?: return
-        // Zero-hop is not offered by the local API, so a summary is region-scoped or not sent at all.
-        val region = transport.summaryRegion(point.first, point.second) ?: return
+        // Zero-hop when the asker was heard directly and the server can do it; else region-scoped;
+        // else nothing. Never the radio's plain flood.
+        val zeroHop = demand.hops == 0 && transport.zeroHopCapable
+        val region = if (zeroHop) null else transport.summaryRegion(point.first, point.second) ?: return
         val radio = transport.radio ?: RadioParams.ASSUMED
-        val airtime = BridgeSummaryCodec.airtimeMs(radio.sf, radio.bwHz, radio.cr, BridgeSummaryCodec.packetBytes(frame.size, region = true))
+        val airtime = BridgeSummaryCodec.airtimeMs(radio.sf, radio.bwHz, radio.cr, BridgeSummaryCodec.packetBytes(frame.size, region = region != null))
         if (!planner.budgetAllows(airtime, clock())) return
         if (!claims.claim(area, demand.hops ?: 255)) {
             planner.noteServed(area, clock())
@@ -340,7 +348,8 @@ class MeshBridge(
         // Another bridge's summary for this area heard while waiting: it is covered.
         if ((planner.lastSummary(area) ?: 0L) >= started) return
         if (!summariesOn()) return
-        if (transport.sendScoped(frame, region)) planner.recordSent(plan, airtime, clock())
+        val sent = if (region == null) transport.sendZeroHop(frame) else transport.sendScoped(frame, region)
+        if (sent) planner.recordSent(plan, airtime, clock())
     }
 
     private suspend fun send(event: NostrEvent, frame: ByteArray, backlogOnFailure: Boolean) {

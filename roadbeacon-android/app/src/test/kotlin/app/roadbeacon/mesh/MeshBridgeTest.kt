@@ -62,6 +62,14 @@ class MeshBridgeTest {
             scoped += frame to region
             return true
         }
+
+        override var zeroHopCapable = false
+        val zeroHop = mutableListOf<ByteArray>()
+        override suspend fun sendZeroHop(frame: ByteArray): Boolean {
+            if (!zeroHopCapable || !accept || !connected.value) return false
+            zeroHop += frame
+            return true
+        }
     }
 
     private class FakeConfig : MeshBridgeConfig {
@@ -267,6 +275,31 @@ class MeshBridgeTest {
         assertEquals(1, entry.stillThere)
         assertEquals(listOf("u2s1" to 2), h.claimed)
         assertTrue(h.transport.sent.isEmpty())
+    }
+
+    @Test
+    fun `zero-hop only when the asker was heard directly and the server can do it`() = runTest {
+        val direct = Harness(this)
+        direct.transport.zeroHopCapable = true
+        direct.relayReport("r1", 5)
+        direct.hear(report, hops = 0)
+
+        val repeated = Harness(this)
+        repeated.transport.zeroHopCapable = true
+        repeated.relayReport("r1", 5)
+        repeated.hear(report, hops = 1)
+
+        val oldServer = Harness(this)
+        oldServer.relayReport("r1", 5)
+        oldServer.hear(report, hops = 0)
+
+        advanceUntilIdle()
+        assertEquals(1, direct.transport.zeroHop.size)
+        assertTrue(direct.transport.scoped.isEmpty())
+        assertEquals(1, repeated.transport.scoped.size)
+        assertTrue(repeated.transport.zeroHop.isEmpty())
+        assertEquals(1, oldServer.transport.scoped.size)
+        assertTrue(oldServer.transport.zeroHop.isEmpty())
     }
 
     @Test

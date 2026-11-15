@@ -234,6 +234,21 @@ class MeshApiSessionTest {
         assertEquals(0x0150, without["dataType"]!!.jsonPrimitive.content.toInt())
         assertFalse(MeshApiSession.sendParams("#roadstr", 0x0150, bytes, "").containsKey("region"))
         assertEquals("sk-ba", MeshApiSession.sendParams("#roadstr", 0x0150, bytes, "sk-ba")["region"]!!.jsonPrimitive.content)
+        // Zero-hop is an empty path and never carries a region (meshcored DESIGN.md 5.5).
+        val zeroHop = MeshApiSession.sendParams("#roadstr", 0x0150, bytes, "sk-ba", zeroHop = true)
+        assertEquals("", zeroHop["path"]!!.jsonPrimitive.content)
+        assertFalse(zeroHop.containsKey("region"))
+        assertFalse(without.containsKey("path"))
+    }
+
+    @Test
+    fun `capabilities come from hello, at the top or under server`() {
+        fun hello(text: String) = Json.parseToJsonElement(text).jsonObject
+        assertEquals(setOf("tx_path_data", "rx_path"),
+            MeshApiSession.capabilities(hello("""{"type":"hello","capabilities":["tx_path_data","rx_path"]}""")))
+        assertEquals(setOf("tx_path_data"),
+            MeshApiSession.capabilities(hello("""{"type":"hello","server":{"name":"meshcored","capabilities":["tx_path_data"]}}""")))
+        assertNull(MeshApiSession.capabilities(hello("""{"type":"hello","device":{}}""")))
     }
 
     @Test
