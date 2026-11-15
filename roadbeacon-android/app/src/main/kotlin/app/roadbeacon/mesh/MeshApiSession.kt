@@ -289,11 +289,12 @@ internal class MeshApiSession(
         /** Send with a path (zero-hop, direct) in `channel.sendData`. */
         const val CAP_TX_PATH_DATA = "tx_path_data"
 
-        /** `capabilities` of a `hello` (top level or under `server`), or null when not given. */
+        /**
+         * Top-level `capabilities` of a `hello` (meshcored DESIGN.md 1.3, 5.6), or null when absent:
+         * then none of the extensions may be used. Unknown names are ignored.
+         */
         fun capabilities(message: JsonObject?): Set<String>? {
-            val list = (message?.get("capabilities") as? JsonArray)
-                ?: ((message?.get("server") as? JsonObject)?.get("capabilities") as? JsonArray)
-                ?: return null
+            val list = message?.get("capabilities") as? JsonArray ?: return null
             return list.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet()
         }
 

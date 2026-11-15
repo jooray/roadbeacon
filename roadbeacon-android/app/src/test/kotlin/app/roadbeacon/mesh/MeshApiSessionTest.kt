@@ -242,12 +242,11 @@ class MeshApiSessionTest {
     }
 
     @Test
-    fun `capabilities come from hello, at the top or under server`() {
+    fun `capabilities come from the top level of hello only`() {
         fun hello(text: String) = Json.parseToJsonElement(text).jsonObject
         assertEquals(setOf("tx_path_data", "rx_path"),
             MeshApiSession.capabilities(hello("""{"type":"hello","capabilities":["tx_path_data","rx_path"]}""")))
-        assertEquals(setOf("tx_path_data"),
-            MeshApiSession.capabilities(hello("""{"type":"hello","server":{"name":"meshcored","capabilities":["tx_path_data"]}}""")))
+        assertNull(MeshApiSession.capabilities(hello("""{"type":"hello","server":{"name":"meshcored","capabilities":["tx_path_data"]}}""")))
         assertNull(MeshApiSession.capabilities(hello("""{"type":"hello","device":{}}""")))
     }
 
