@@ -107,14 +107,14 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
   <figure class="narrow"><picture><source srcset="../img/meshcore/join-dialog.webp" type="image/webp"><img src="../img/meshcore/join-dialog.png" width="720" height="565" alt="Dialóg MeshCore Open v angličtine: Add a channel? Roadbeacon chce do rádia pridať hashtagový kanál #roadstr. Hashtagový kanál môže čítať a písať doň každý, kto pozná jeho názov. Tlačidlá Deny a Add." loading="lazy"></picture><figcaption>Keď uzol nemá kanál #roadstr, dopravná aplikácia oň požiada.</figcaption></figure>
   <p>Hlásenia idú von ako dáta kanála MeshCore, nie ako text chatu, takže chatovacie klienty, ktoré formát nepoznajú, ich nikdy nezobrazia. MeshCore vedie register dátových typov a Road Events tam už majú vlastný: <code>0x0150</code> (<a href="https://github.com/meshcore-dev/MeshCore/pull/3750">MeshCore#3750</a>). Prvé testovacie buildy používali vývojovú hodnotu <code>0xFF52</code>, ktorú aktuálne buildy už neposielajú ani neprijímajú, takže aktualizujte všetky aplikácie naraz.</p>
   <p>Hlásenie má 117 až 163 bajtov a hlas 134, takže sa každé zmestí do jedného paketu LoRa a nič sa nedelí. Odosielanie čaká na tiché rádio rovnako ako správy z chatu a mosty medzi rádiom a relé majú hodinové limity.</p>
-  <p>API je zatiaľ návrh pre MeshCore Open (<a href="https://github.com/zjs81/meshcore-open/issues/616">#616</a>). Referenčná dokumentácia je v <a href="https://github.com/jooray/meshcore-open/blob/test/localapi-4/documentation/LOCAL_API.md">LOCAL_API.md</a> a rádiovú stranu dopravných hlásení popisuje <a href="https://github.com/jooray/roadbeacon/blob/main/docs/meshcore.md">docs/meshcore.md</a>.</p>
+  <p>API je zatiaľ návrh pre MeshCore Open (<a href="https://github.com/zjs81/meshcore-open/issues/616">#616</a>). Referenčná dokumentácia je v <a href="https://github.com/jooray/meshcore-open/blob/test/localapi-5/documentation/LOCAL_API.md">LOCAL_API.md</a> a rádiovú stranu dopravných hlásení popisuje <a href="https://github.com/jooray/roadbeacon/blob/main/docs/meshcore.md">docs/meshcore.md</a>.</p>
 </section>
 
 <section aria-labelledby="test">
   <h2 id="test">Ako to otestovať</h2>
   <p>Potrebujete telefón s Androidom a companion uzol MeshCore s firmvérom 1.15 alebo novším. Oveľa lepšie sú dva telefóny s dvoma uzlami, pretože testujeme hlavne to, či hlásenie prejde z jedného rádia na druhé.</p>
   <div class="btns">
-    <a class="btn" href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-5">Testovacie buildy MeshCore Open a Roadstr</a>
+    <a class="btn" href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-6">Testovacie buildy MeshCore Open a Roadstr</a>
     <a class="btn alt" href="https://zapstore.dev/apps/app.roadbeacon">Roadbeacon na Zapstore</a>
   </div>
   <div class="card">
@@ -135,7 +135,7 @@ footer{margin:3rem 0 2rem;padding-top:1rem;border-top:1px solid var(--line);colo
     <figure><picture><source srcset="../img/meshcore/roadstr-meshcore-settings.webp" type="image/webp"><img src="../img/meshcore/roadstr-meshcore-settings.png" width="720" height="1373" alt="Nastavenia Roadstr, časť MeshCore: zapnuté Use the radio through MeshCore Open, kľúč, ktorý má ukázať MeshCore Open, stav Connected and ready, zapnuté Receive a Send, oba mosty vypnuté." loading="lazy"></picture><figcaption>Nastavenia MeshCore v Roadstr, keď je pripojený a pripravený.</figcaption></figure>
     <figure><picture><source srcset="../img/meshcore/roadstr-map.webp" type="image/webp"><img src="../img/meshcore/roadstr-map.jpg" width="719" height="1133" alt="Mapa Roadstr so starým mestom v Košiciach okolo Hlavnej ulice." loading="lazy"></picture><figcaption>Mapa v Roadstr. Hlásenia prijaté cez rádio sa tu objavia ako všetky ostatné.</figcaption></figure>
   </div>
-  <p>Celý kontrolný zoznam a to, čo už je otestované, nájdete v <a href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-5">poznámkach k vydaniu</a> (po anglicky). Prechod hlásenia z jedného rádia na druhé zatiaľ nikto nepotvrdil. Ak to skúsite, dajte nám vedieť, ako to dopadlo: otvorte issue pre <a href="https://github.com/jooray/roadbeacon/issues">Roadbeacon</a>, <a href="https://github.com/jooray/meshcore-open/issues">lokálne API v MeshCore Open</a> alebo <a href="https://github.com/roadstrapp/roadstr-app/issues">Roadstr</a>, alebo napíšte na Nostri.</p>
+  <p>Celý kontrolný zoznam a to, čo už je otestované, nájdete v <a href="https://github.com/jooray/meshcore-open/releases/tag/localapi-test-6">poznámkach k vydaniu</a> (po anglicky). Prechod hlásenia z jedného rádia na druhé zatiaľ nikto nepotvrdil. Ak to skúsite, dajte nám vedieť, ako to dopadlo: otvorte issue pre <a href="https://github.com/jooray/roadbeacon/issues">Roadbeacon</a>, <a href="https://github.com/jooray/meshcore-open/issues">lokálne API v MeshCore Open</a> alebo <a href="https://github.com/roadstrapp/roadstr-app/issues">Roadstr</a>, alebo napíšte na Nostri.</p>
 </section>
 </main>
 <footer><div class="wrap">
