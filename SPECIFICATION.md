@@ -274,12 +274,13 @@ Everything here is a hard rule for an implementation, not a tuning default, unle
    the remaining slots. The bridge sends 1, 3 or 5 entries when it can (no padding waste).
 5. **Never a plain flood.** The bridge sends **zero-hop** where its radio link allows it (companion
    `CMD_SEND_CHANNEL_DATA` with `path_len` 0) and the demand was heard at 0 hops. Otherwise it sends
-   **region-scoped**: the flood region the user configured, or else the one MeshCore Open resolves
+   **region-scoped**: the flood region the user configured, or else the one the local API host (MeshCore Open, meshcored) resolves
    for the demand point (`regions.resolve`). With neither, it does not send. Through the local API,
    zero-hop is `channel.sendData` with `"path": ""` (an optional `path`/`pathHashSize`, missing =
    flood as today), used only when the server lists `tx_path_data` in `hello.capabilities`: an
-   older server ignores the field and would flood. Until MeshCore Open has it, summaries through it
-   are region-scoped.
+   older server ignores the field and would flood. Without it, summaries through it are
+   region-scoped. The local API is specified in
+   [jooray/meshcore-local-api](https://github.com/jooray/meshcore-local-api) (protocol 1).
 6. **Airtime budget.** At most **0.1 % of each rolling hour** (3.6 s) of the bridge's own
    transmissions for summaries, computed from the LoRa time-on-air of the whole packet (5 bytes of
    header, the 16-byte blocks, 4 bytes of region code) with the radio's spreading factor, bandwidth

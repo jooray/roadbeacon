@@ -16,7 +16,7 @@ import app.roadbeacon.location.LocationStartResult
 import app.roadbeacon.model.*
 import app.roadbeacon.nostr.*
 import app.roadbeacon.mesh.MeshBridge
-import app.roadbeacon.mesh.MeshCoreApiClient
+import app.roadbeacon.mesh.LocalApiTransport
 import app.roadbeacon.mesh.NostrBridgeClaims
 import app.roadbeacon.mesh.SummaryEntry
 import app.roadbeacon.mesh.SummaryPlanner
@@ -109,7 +109,7 @@ class RoadbeaconService : Service() {
         if (app.meshBridge != null && meshUrlInUse == app.settings.meshUrl) return
         app.meshBridge?.stop()
         meshUrlInUse = app.settings.meshUrl
-        val client = MeshCoreApiClient(app.settings, serviceScope)
+        val client = LocalApiTransport(app.settings, serviceScope)
         val bridge = MeshBridge(
             settings = app.settings,
             transport = client,

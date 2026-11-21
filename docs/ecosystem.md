@@ -137,7 +137,7 @@ The report frame carries key, time, lat/lon (×10⁶), category, `expiration`, `
 status and signature; nothing needs to be looked up.
 
 46 bytes of comment is ≈46 Latin characters or ≈15 CJK characters — enough for "police checking
-seatbelts". The radio carries 165, but a BLE companion link and MeshCore Open's local API carry 163,
+seatbelts". The radio carries 165, but a BLE companion link and the MeshCore Local API carry 163,
 so encoders stop at 46 bytes; decoders still accept 48. Two-packet comments were considered and rejected: partial events and reassembly state
 are not worth it for a comment that long. If field data ever says otherwise, that is a new frame
 version, not a silent change.
@@ -206,7 +206,9 @@ ready; the transport is still the largest piece and needs hardware.
 6. **MeshCore parameters.** Keep `#roadstr` (key
    `b7f4317db7b03aeb563b2c4bdc476d6a`). `0x0150` ("Road Events") is allocated in MeshCore's
    registry (`docs/number_allocations.md`); both apps send and receive only `0x0150`. The
-   development value `0xFF52` of the first test builds is retired.
+   development value `0xFF52` of the first test builds is retired. Apps that share a radio through
+   a host app on the phone use the [MeshCore Local API](https://github.com/jooray/meshcore-local-api)
+   (protocol 1; MeshCore Open test build `localapi-test-10` or later, or `meshcored`).
 7. **Corrections.** Kinds 1317/1318 remain theirs; we do not implement them yet. They should be
    documented in the NIP when we do.
 
@@ -331,7 +333,7 @@ This repository: `nips/road-events.md`, `docs/ecosystem.md`,
 | 165 | largest frame decoded (48-byte comment); the radio's own payload limit |
 | 134 | vote frame, self-contained |
 | 46 | comment limit in UTF-8 bytes when encoding |
-| 163 | largest channel datagram over BLE / MeshCore Open's local API |
+| 163 | largest channel datagram over BLE / the MeshCore Local API |
 | 14 d / 30 d | relay retention floor / long-lived category lifetime |
 | 0x0150 | `data_type` "Road Events", allocated by MeshCore; sent and received |
 | `b7f4317db7b03aeb563b2c4bdc476d6a` | channel key of `#roadstr` |

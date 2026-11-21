@@ -1,6 +1,8 @@
 # MeshCore transport — how road events travel over LoRa
 
-Status: implemented in Roadbeacon and Roadstr (test builds), MeshCore Open local API on a branch.
+Status: implemented in Roadbeacon and Roadstr (test builds). The radio is reached through the
+[MeshCore Local API](https://github.com/jooray/meshcore-local-api), protocol 1, served by MeshCore
+Open (test build `localapi-test-10` or later) or `meshcored`.
 Not yet validated on a physical radio. This document is the operational half of the format; the
 bytes are specified in [`nips/road-events.md`](../nips/road-events.md).
 
@@ -94,25 +96,38 @@ Limits (Roadbeacon; Roadstr uses the same numbers):
 | frames accepted from radio | 60 / min |
 | votes waiting for their report | 64 (32 reports), 15 min |
 
-The replay cursor is the `receivedAt` (MeshCore Open's clock) of the last frame processed, sent back
-as `since` on the next subscribe; replays are in order and duplicates are dropped by event ID.
+The replay cursor is the `receivedAt` (the host's clock) of the last frame processed, sent back
+as `since` on the next subscribe; replays are in order. The client library drops frames it has
+already delivered, and the bridge drops duplicates by event ID.
 
 ## Local API and pairing
 
-MeshCore Open's API is opt-in, loopback-only (`ws://127.0.0.1:8787/api/v1`; Roadbeacon refuses any
-other host) and tokenless:
+The protocol is defined in the [MeshCore Local API](https://github.com/jooray/meshcore-local-api)
+repository (`SPEC.md`, protocol 1, with test vectors). Roadbeacon uses its Kotlin client library
+(`com.github.jooray:meshcore-local-api`, package `io.github.jooray.meshcore.localapi`); the app only
+adapts it (`LocalApiTransport`): the pairing key stays in the same setting, the replay cursor is the
+library's `CursorStore`. A host is needed: MeshCore Open from test build `localapi-test-10` on
+(<https://github.com/jooray/meshcore-open/releases>), or `meshcored`. Older MeshCore Open test
+builds speak an earlier draft and do not pair.
+
+The API is opt-in, loopback-only (`ws://127.0.0.1:8787/api/v1`; Roadbeacon refuses any other host)
+and tokenless:
 
 * each client holds a P-256 key; the first connection shows **“Allow Roadbeacon (AB12 CD34 …)?”**
   in MeshCore Open. The name is self-declared, the fingerprint is not: Roadbeacon shows its own
   under *Settings → MeshCore → Pairing fingerprint* to compare;
-* the client signs `meshcore-open-pair-v1:<nonce>`, built by itself from the challenge nonce, once
-  per connection — never a string the server chose;
+* the client signs `meshcore-local-api-pair-v1:<nonce>` once per connection, only when the
+  challenge is exactly that string for its own nonce; anything else closes the connection, so it is
+  never a signing oracle;
+* capabilities are strict: a feature is used only when `hello.capabilities` lists it (`replay` for
+  `since`, `regions` for region-scoped sends and `regions.resolve`, `channels_join`, `tx_path_data`
+  for zero-hop);
 * reconnects re-prove the key without a prompt; every authenticated connection subscribes again;
 * pairing can be revoked in MeshCore Open, which ends the live session (close 4003). A refused or
   revoked client retries every 2 minutes and shows "Not approved".
 
-After `hello` the client follows the radio rather than the socket (`MeshApiSession` holds the
-decisions, `MeshApiSessionTest` checks them):
+After `hello` the client follows the radio rather than the socket (the library's `MeshApiSession`
+holds the decisions; its tests check them):
 
 1. `hello.device.connected` and the `device` message say whether MeshCore Open is connected to the
    radio and has loaded its channels. The initial state comes from `hello`; after it, MeshCore Open
@@ -130,7 +145,8 @@ decisions, `MeshApiSessionTest` checks them):
    the channel exists, otherwise asks the user (up to 2 minutes, with a notification when in the
    background), so this request waits 150 s instead of the usual 15 s. On success the client
    subscribes. On `denied` it shows "Add #roadstr in MeshCore Open" and does not ask again for
-   10 minutes, or until *Use MeshCore radio* is switched off and on. Join errors: `invalid_params`
+   10 minutes, or until *Use MeshCore radio* is switched off and on. Only with `channels_join`;
+   without it a missing channel ends in "The radio has no #roadstr channel". Join errors: `invalid_params`
    (the name must match `^#[a-z0-9-]{1,31}$`), `not_connected`, `denied`, `no_free_slot`,
    `channel_conflict`, `rate_limited`, `pairing_pending`.
 5. A server that never sends `device` (an older MeshCore Open) gets a slow fallback: a connection
@@ -142,9 +158,8 @@ decisions, `MeshApiSessionTest` checks them):
 *Settings → MeshCore → Open MeshCore Open* launches `com.meshcore.meshcore_open` for pairing,
 connecting the radio or adding the channel.
 
-Protocol, methods and errors: `documentation/LOCAL_API.md` in the MeshCore Open fork
-(jooray/meshcore-open, branch `feat/local-api`; `device`, `channels.join` and `hops` are
-additions to protocol 1), upstream issue [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/issues/616).
+Protocol, methods and errors: [jooray/meshcore-local-api](https://github.com/jooray/meshcore-local-api)
+(`SPEC.md`). Upstream discussion: [zjs81/meshcore-open#616](https://github.com/zjs81/meshcore-open/issues/616).
 
 ## Failure modes
 
@@ -160,7 +175,9 @@ additions to protocol 1), upstream issue [zjs81/meshcore-open#616](https://githu
 | server without `device` messages | `device.info` and a new subscription every 60 s while unsubscribed |
 | flood region unknown to MeshCore Open (`unknown_region`) | sends refused; status names the region until a send goes through |
 | firmware without channel data | MeshCore Open answers `unsupported_firmware`; nothing is sent |
-| duplicate frames | dropped by event ID |
+| duplicate frames | replays dropped by the library, the rest by event ID |
+| server without `tx_path_data` | no zero-hop; summaries go region-scoped or not at all |
+| server without `regions` | no region on sends, no `regions.resolve`; summaries need a configured region |
 | signature invalid | dropped before display or forwarding |
 | clock far in the future | dropped |
 
@@ -169,13 +186,14 @@ additions to protocol 1), upstream issue [zjs81/meshcore-open#616](https://githu
 * Codec: Roadbeacon runs the shared vectors (`nips/vectors/road-events-v1.json`) on Android and web;
   Roadstr runs the same file.
 * Bridge: `MeshBridgeTest` (fake radio, signed vector events): verification, dedupe, parking,
-  staleness, cursor, backlog, receive limit, and relay→radio summaries (demand, hold, interval,
+  staleness, backlog, receive limit, and relay→radio summaries (demand, hold, interval,
   region only, lost claim, another bridge's summary, nothing published). `SummaryPlannerTest` and
   `BridgeSummaryVectorsTest` cover the planner limits and `nips/vectors/road-bridge-v1.json`.
   Roadstr runs the same file.
-* Local API: server tests in MeshCore Open against a fake host; `MeshApiSessionTest` for the
-  client's decisions (radio state, one subscription per connection, join, denial pause, fallback
-  retry, data types, region, hops).
+* Local API: the conformance vectors and client tests of
+  [meshcore-local-api](https://github.com/jooray/meshcore-local-api) (pairing, capabilities, radio
+  state, one subscription per connection, join, denial pause, fallback retry, replay cursor,
+  region, zero-hop); server tests in MeshCore Open and meshcored.
 * **Hardware: not tested.** No radio was available. The checklist is: pair a radio, create the
   channel, send a report A→B, compare event IDs, pull the BLE link mid-send, bridge offline→online,
   and record airtime with default limits.

@@ -81,6 +81,8 @@ dependencies {
     implementation("androidx.preference:preference-ktx:1.2.1")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // MeshCore Local API client (https://github.com/jooray/meshcore-local-api)
+    implementation("com.github.jooray:meshcore-local-api:v0.1.0")
 
     implementation("fr.acinq.secp256k1:secp256k1-kmp:0.15.0")
     implementation("fr.acinq.secp256k1:secp256k1-kmp-jni-android:0.15.0")

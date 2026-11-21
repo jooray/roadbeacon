@@ -78,7 +78,6 @@ class MeshBridgeTest {
         override var meshReceive = true
         override var meshBridgeToNostr = true
         override var meshBridgeToRadio = true
-        override var meshCursor: String? = null
     }
 
     private inner class Harness(scope: TestScope) {
@@ -203,16 +202,6 @@ class MeshBridgeTest {
         early.nowMs = (report.createdAt - 600) * 1000 // ten minutes before it was made
         early.hear(report)
         assertTrue(early.shown.isEmpty())
-    }
-
-    @Test
-    fun `the replay cursor only moves forward`() = runTest {
-        val h = Harness(this)
-        h.hear(report, "2025-10-27T08:10:00.123456Z")
-        h.hear(yes, "2025-10-27T08:09:00.000Z")
-        assertEquals("2025-10-27T08:10:00.123456Z", h.config.meshCursor)
-        h.hear(no, "2025-10-27T08:11:00Z")
-        assertEquals("2025-10-27T08:11:00Z", h.config.meshCursor)
     }
 
     @Test

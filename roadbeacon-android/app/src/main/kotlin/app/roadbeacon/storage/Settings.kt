@@ -110,10 +110,10 @@ class Settings(context: Context) : MeshBridgeConfig {
         set(value) = prefs.edit().putString(KEY_MESH_REGION, value).apply()
 
     /**
-     * MeshCore Open's receive time (ISO-8601) of the last radio datagram this app processed, sent
-     * back as `since` so a reconnect replays what it missed. The server's clock, not ours.
+     * The Local API replay cursor (the library's `CursorStore`): the host's receive time of the
+     * last radio datagram, sent back as `since` so a reconnect replays what it missed.
      */
-    override var meshCursor: String?
+    var meshCursor: String?
         get() = prefs.getString(KEY_MESH_CURSOR, null)
         set(value) = prefs.edit().putString(KEY_MESH_CURSOR, value).apply()
 

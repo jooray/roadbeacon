@@ -14,7 +14,13 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import kotlin.random.Random
 
-/** The radio as the bridge sees it; [MeshCoreApiClient] in the app, a fake in tests. */
+/**
+ * One channel datagram; [receivedAt] is the host's receive time. [hops] is the flood hop count
+ * (0 = heard from the sender's radio), null for a direct path or when the server does not say.
+ */
+data class MeshDatagram(val payload: ByteArray, val snrDb: Double, val receivedAt: String?, val hops: Int?)
+
+/** The radio as the bridge sees it; [LocalApiTransport] in the app, a fake in tests. */
 interface MeshTransport {
     val datagrams: Flow<MeshDatagram>
     val connected: StateFlow<Boolean>
@@ -53,7 +59,6 @@ interface MeshBridgeConfig {
     val meshReceive: Boolean
     val meshBridgeToNostr: Boolean
     val meshBridgeToRadio: Boolean
-    var meshCursor: String?
 }
 
 /**
@@ -141,7 +146,6 @@ class MeshBridge(
 
     internal fun onDatagram(datagram: MeshDatagram) {
         if (!settings.meshReceive) return
-        advanceCursor(datagram.receivedAt)
         if (!radioIn.allow(clock())) return
         val heardAt = datagram.receivedAt?.let(::parseInstant)?.toEpochMilli()?.coerceAtMost(clock()) ?: clock()
         when (BridgeSummaryCodec.family(datagram.payload)) {
@@ -213,12 +217,6 @@ class MeshBridge(
      */
     fun onReportKnown(reportId: String) {
         takeParked(reportId).forEach(onInbound)
-    }
-
-    private fun advanceCursor(receivedAt: String?) {
-        val next = receivedAt?.let(::parseInstant) ?: return
-        val current = settings.meshCursor?.let(::parseInstant)
-        if (current == null || next.isAfter(current)) settings.meshCursor = receivedAt
     }
 
     private fun park(reportId: String, vote: NostrEvent) {

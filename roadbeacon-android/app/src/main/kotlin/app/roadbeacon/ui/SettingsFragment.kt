@@ -10,8 +10,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.*
 import app.roadbeacon.RoadbeaconApplication
 import app.roadbeacon.RoadbeaconService
-import app.roadbeacon.mesh.MeshApiState
-import app.roadbeacon.mesh.MeshCoreApiClient
+import app.roadbeacon.mesh.LocalApiTransport
+import io.github.jooray.meshcore.localapi.SessionState
 import app.roadbeacon.model.EventType
 import app.roadbeacon.util.UnitFormatter
 import app.roadbeacon.util.UnitSystem
@@ -260,8 +260,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
         meshCategory.addPreference(meshFingerprint)
         viewLifecycleOwnerLiveData.observe(this) { owner ->
             owner?.lifecycleScope?.launch {
-                val client = app.meshClient ?: MeshCoreApiClient(app.settings, this)
-                meshFingerprint.summary = "${client.fingerprint()} — compare with MeshCore Open's dialog"
+                val fingerprint = app.meshClient?.fingerprint ?: LocalApiTransport.fingerprint(app.settings)
+                meshFingerprint.summary = "$fingerprint — compare with MeshCore Open's dialog"
             }
         }
 
@@ -364,26 +364,26 @@ class SettingsFragment : PreferenceFragmentCompat() {
         preferenceScreen = screen
     }
 
-    private fun meshStatusText(state: MeshApiState?): String = when (state) {
-        null, MeshApiState.Disconnected -> "Off"
-        MeshApiState.Connecting -> "Connecting…"
-        MeshApiState.WaitingForApproval -> "Waiting for approval in MeshCore Open"
-        MeshApiState.NotApproved ->
+    private fun meshStatusText(state: SessionState?): String = when (state) {
+        null, SessionState.Disconnected -> "Off"
+        SessionState.Connecting -> "Connecting…"
+        SessionState.WaitingForApproval -> "Waiting for approval in MeshCore Open"
+        SessionState.NotApproved ->
             "Not approved in MeshCore Open (allow Roadbeacon there; retrying every 2 min)"
-        is MeshApiState.Connected -> {
+        is SessionState.Connected -> {
             val connected = "Connected to ${state.deviceName ?: "radio"}"
             if (state.unknownRegion == null) connected
             else "$connected; MeshCore Open does not know flood region \"${state.unknownRegion}\", nothing is sent"
         }
-        MeshApiState.NoRadio -> "MeshCore Open is not connected to the radio"
-        MeshApiState.WaitingForChannel -> "Waiting for you to allow in MeshCore Open"
-        MeshApiState.ChannelDenied -> "Add #roadstr in MeshCore Open"
-        is MeshApiState.ChannelMissing ->
+        SessionState.NoRadio -> "MeshCore Open is not connected to the radio"
+        SessionState.WaitingForChannel -> "Waiting for you to allow in MeshCore Open"
+        SessionState.ChannelDenied -> "Add #roadstr in MeshCore Open"
+        is SessionState.ChannelMissing ->
             "The radio has no #roadstr channel; add it in MeshCore Open" +
                 (state.code?.let { " ($it)" } ?: "")
-        is MeshApiState.Refused ->
+        is SessionState.Refused ->
             "MeshCore Open refused the subscription (${state.code ?: "no answer"})"
-        is MeshApiState.Failed -> state.message
+        is SessionState.Failed -> state.message
     }
 
     private fun regionSummary(region: String): String =
